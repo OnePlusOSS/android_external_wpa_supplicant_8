@@ -390,9 +390,19 @@ void HidlManager::destroyInstance()
 
 int HidlManager::registerHidlService(struct wpa_global *global)
 {
+	::android::status_t status;
+
 	// Create the main hidl service object and register it.
 	supplicant_object_ = new Supplicant(global);
-	if (supplicant_object_->registerAsService() != android::NO_ERROR) {
+	if (global->params.hidl_service_name) {
+		wpa_printf(MSG_DEBUG, "hidl_register service name %s", global->params.hidl_service_name);
+		status = supplicant_object_->registerAsService(global->params.hidl_service_name);
+	} else {
+		wpa_printf(MSG_DEBUG, "hidl_register service name default");
+		status = supplicant_object_->registerAsService();
+	}
+
+	if (status != android::NO_ERROR) {
 		return 1;
 	}
 	return 0;
