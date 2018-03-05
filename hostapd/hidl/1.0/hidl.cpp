@@ -53,8 +53,17 @@ int hostapd_hidl_init(struct hapd_interfaces *interfaces)
 	service = new Hostapd(interfaces);
 	if (!service)
 		goto err;
-	if (service->registerAsService() != android::NO_ERROR)
-		goto err;
+	if (interfaces->hidl_service_name) {
+		wpa_printf(MSG_DEBUG, "Override HIDL service name: %s",
+			   interfaces->hidl_service_name);
+		if (service->registerAsService(interfaces->hidl_service_name)
+		    != android::NO_ERROR)
+			goto err;
+	} else {
+		wpa_printf(MSG_DEBUG, "Using default HIDL service name");
+		if (service->registerAsService() != android::NO_ERROR)
+			goto err;
+	}
 	return 0;
 err:
 	hostapd_hidl_deinit(interfaces);
@@ -68,4 +77,6 @@ void hostapd_hidl_deinit(struct hapd_interfaces *interfaces)
 	IPCThreadState::shutdown();
 	hidl_fd = -1;
 	service.clear();
+	os_free(interfaces->hidl_service_name);
+	interfaces->hidl_service_name = NULL;
 }
