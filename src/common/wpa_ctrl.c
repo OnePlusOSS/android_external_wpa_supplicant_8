@@ -21,11 +21,9 @@
 
 #ifdef ANDROID
 #include <dirent.h>
-#include <grp.h>
-#include <pwd.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 #include <cutils/sockets.h>
+#include "private/android_filesystem_config.h"
 #endif /* ANDROID */
 
 #ifdef CONFIG_CTRL_IFACE_UDP_IPV6
@@ -100,12 +98,6 @@ struct wpa_ctrl * wpa_ctrl_open2(const char *ctrl_path,
 	size_t res;
 	int tries = 0;
 	int flags;
-#ifdef ANDROID
-	struct group *grp_wifi;
-	gid_t gid_wifi;
-	struct passwd *pwd_system;
-	uid_t uid_system;
-#endif
 
 	if (ctrl_path == NULL)
 		return NULL;
@@ -161,18 +153,8 @@ try_again:
 #ifdef ANDROID
 	chmod(ctrl->local.sun_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 	/* Set group even if we do not have privileges to change owner */
-	grp_wifi = getgrnam("wifi");
-	gid_wifi = grp_wifi ? grp_wifi->gr_gid : 0;
-	pwd_system = getpwnam("system");
-	uid_system = pwd_system ? pwd_system->pw_uid : 0;
-	if (!gid_wifi || !uid_system) {
-		close(ctrl->s);
-		unlink(ctrl->local.sun_path);
-		os_free(ctrl);
-		return NULL;
-	}
-	chown(ctrl->local.sun_path, -1, gid_wifi);
-	chown(ctrl->local.sun_path, uid_system, gid_wifi);
+	chown(ctrl->local.sun_path, -1, AID_WIFI);
+	chown(ctrl->local.sun_path, AID_SYSTEM, AID_WIFI);
 
 	if (os_strncmp(ctrl_path, "@android:", 9) == 0) {
 		if (socket_local_client_connect(

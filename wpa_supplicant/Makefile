@@ -709,9 +709,13 @@ endif
 
 ifdef CONFIG_EAP_PWD
 CFLAGS += -DEAP_PWD
+ifeq ($(CONFIG_TLS), wolfssl)
+CFLAGS += -DCONFIG_ECC
+endif
 OBJS += ../src/eap_peer/eap_pwd.o ../src/eap_common/eap_pwd_common.o
 CONFIG_IEEE8021X_EAPOL=y
 NEED_SHA256=y
+NEED_ECC=y
 endif
 
 ifdef CONFIG_EAP_EKE
@@ -1053,6 +1057,20 @@ CFLAGS += -DCONFIG_TLSV12
 NEED_SHA256=y
 endif
 
+ifeq ($(CONFIG_TLS), wolfssl)
+ifdef TLS_FUNCS
+CFLAGS += -DWOLFSSL_DER_LOAD -I/usr/local/include/wolfssl
+OBJS += ../src/crypto/tls_wolfssl.o
+endif
+OBJS += ../src/crypto/crypto_wolfssl.o
+OBJS_p += ../src/crypto/crypto_wolfssl.o
+ifdef NEED_FIPS186_2_PRF
+OBJS += ../src/crypto/fips_prf_wolfssl.o
+endif
+LIBS += -lwolfssl -lm
+LIBS_p += -lwolfssl -lm
+endif
+
 ifeq ($(CONFIG_TLS), openssl)
 ifdef TLS_FUNCS
 CFLAGS += -DEAP_TLS_OPENSSL
@@ -1081,22 +1099,33 @@ CFLAGS += -DTLS_DEFAULT_CIPHERS=\"$(CONFIG_TLS_DEFAULT_CIPHERS)\"
 endif
 
 ifeq ($(CONFIG_TLS), gnutls)
+ifndef CONFIG_CRYPTO
+# default to libgcrypt
+CONFIG_CRYPTO=gnutls
+endif
 ifdef TLS_FUNCS
 OBJS += ../src/crypto/tls_gnutls.o
 LIBS += -lgnutls -lgpg-error
 endif
-OBJS += ../src/crypto/crypto_gnutls.o
-OBJS_p += ../src/crypto/crypto_gnutls.o
-OBJS_priv += ../src/crypto/crypto_gnutls.o
+OBJS += ../src/crypto/crypto_$(CONFIG_CRYPTO).o
+OBJS_p += ../src/crypto/crypto_$(CONFIG_CRYPTO).o
+OBJS_priv += ../src/crypto/crypto_$(CONFIG_CRYPTO).o
 ifdef NEED_FIPS186_2_PRF
 OBJS += ../src/crypto/fips_prf_internal.o
 SHA1OBJS += ../src/crypto/sha1-internal.o
 endif
+ifeq ($(CONFIG_CRYPTO), gnutls)
 LIBS += -lgcrypt
 LIBS_p += -lgcrypt
-CONFIG_INTERNAL_SHA256=y
 CONFIG_INTERNAL_RC4=y
 CONFIG_INTERNAL_DH_GROUP5=y
+endif
+ifeq ($(CONFIG_CRYPTO), nettle)
+LIBS += -lnettle -lgmp
+LIBS_p += -lnettle -lgmp
+CONFIG_INTERNAL_RC4=y
+CONFIG_INTERNAL_DH_GROUP5=y
+endif
 endif
 
 ifeq ($(CONFIG_TLS), internal)
@@ -1262,7 +1291,9 @@ AESOBJS += ../src/crypto/aes-internal.o ../src/crypto/aes-internal-dec.o
 endif
 
 ifneq ($(CONFIG_TLS), openssl)
+ifneq ($(CONFIG_TLS), wolfssl)
 NEED_INTERNAL_AES_WRAP=y
+endif
 endif
 ifdef CONFIG_OPENSSL_INTERNAL_AES_WRAP
 # Seems to be needed at least with BoringSSL
@@ -1302,7 +1333,9 @@ ifdef CONFIG_OPENSSL_CMAC
 CFLAGS += -DCONFIG_OPENSSL_CMAC
 else
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), wolfssl)
 AESOBJS += ../src/crypto/aes-omac1.o
+endif
 endif
 endif
 endif
@@ -1316,7 +1349,9 @@ ifdef NEED_AES_CBC
 NEED_AES_ENC=y
 ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), wolfssl)
 AESOBJS += ../src/crypto/aes-cbc.o
+endif
 endif
 endif
 endif
@@ -1332,7 +1367,11 @@ endif
 ifdef NEED_SHA1
 ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), gnutls)
+ifneq ($(CONFIG_TLS), wolfssl)
 SHA1OBJS += ../src/crypto/sha1.o
+endif
+endif
 endif
 endif
 SHA1OBJS += ../src/crypto/sha1-prf.o
@@ -1346,7 +1385,9 @@ ifdef CONFIG_NO_WPA_PASSPHRASE
 CFLAGS += -DCONFIG_NO_PBKDF2
 else
 ifneq ($(CONFIG_TLS), openssl)
+ifneq ($(CONFIG_TLS), wolfssl)
 SHA1OBJS += ../src/crypto/sha1-pbkdf2.o
+endif
 endif
 endif
 ifdef NEED_T_PRF
@@ -1360,7 +1401,11 @@ endif
 ifndef CONFIG_FIPS
 ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), gnutls)
+ifneq ($(CONFIG_TLS), wolfssl)
 MD5OBJS += ../src/crypto/md5.o
+endif
+endif
 endif
 endif
 endif
@@ -1381,6 +1426,9 @@ endif
 
 DESOBJS = # none needed when not internal
 ifdef NEED_DES
+ifndef CONFIG_FIPS
+CFLAGS += -DCONFIG_DES
+endif
 ifdef CONFIG_INTERNAL_DES
 DESOBJS += ../src/crypto/des-internal.o
 endif
@@ -1403,7 +1451,11 @@ ifdef NEED_SHA256
 CFLAGS += -DCONFIG_SHA256
 ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), gnutls)
+ifneq ($(CONFIG_TLS), wolfssl)
 SHA256OBJS += ../src/crypto/sha256.o
+endif
+endif
 endif
 endif
 SHA256OBJS += ../src/crypto/sha256-prf.o
@@ -1438,7 +1490,11 @@ endif
 ifdef NEED_SHA384
 ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), gnutls)
+ifneq ($(CONFIG_TLS), wolfssl)
 OBJS += ../src/crypto/sha384.o
+endif
+endif
 endif
 endif
 CFLAGS += -DCONFIG_SHA384
@@ -1447,7 +1503,11 @@ endif
 ifdef NEED_SHA512
 ifneq ($(CONFIG_TLS), openssl)
 ifneq ($(CONFIG_TLS), linux)
+ifneq ($(CONFIG_TLS), gnutls)
+ifneq ($(CONFIG_TLS), wolfssl)
 OBJS += ../src/crypto/sha512.o
+endif
+endif
 endif
 endif
 CFLAGS += -DCONFIG_SHA512
@@ -1646,7 +1706,9 @@ endif
 ifdef CONFIG_FIPS
 CFLAGS += -DCONFIG_FIPS
 ifneq ($(CONFIG_TLS), openssl)
+ifneq ($(CONFIG_TLS), wolfssl)
 $(error CONFIG_FIPS=y requires CONFIG_TLS=openssl)
+endif
 endif
 endif
 
@@ -1846,7 +1908,7 @@ preauth_test: $(OBJS_t2)
 	@$(E) "  LD " $@
 
 wpa_passphrase: $(OBJS_p)
-	$(Q)$(LDO) $(LDFLAGS) -o wpa_passphrase $(OBJS_p) $(LIBS_p)
+	$(Q)$(LDO) $(LDFLAGS) -o wpa_passphrase $(OBJS_p) $(LIBS_p) $(LIBS)
 	@$(E) "  LD " $@
 
 wpa_cli: $(OBJS_c)

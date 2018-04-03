@@ -177,6 +177,7 @@ struct wpa_auth_config {
 #ifdef CONFIG_IEEE80211W
 	enum mfp_options ieee80211w;
 	int group_mgmt_cipher;
+	int sae_require_mfp;
 #endif /* CONFIG_IEEE80211W */
 #ifdef CONFIG_IEEE80211R_AP
 	u8 ssid[SSID_MAX_LEN];
@@ -331,6 +332,7 @@ int wpa_auth_pmksa_add_preauth(struct wpa_authenticator *wpa_auth,
 			       struct eapol_state_machine *eapol);
 int wpa_auth_pmksa_add_sae(struct wpa_authenticator *wpa_auth, const u8 *addr,
 			   const u8 *pmk, const u8 *pmkid);
+void wpa_auth_add_sae_pmkid(struct wpa_state_machine *sm, const u8 *pmkid);
 int wpa_auth_pmksa_add2(struct wpa_authenticator *wpa_auth, const u8 *addr,
 			const u8 *pmk, size_t pmk_len, const u8 *pmkid,
 			int session_timeout, int akmp);
@@ -437,5 +439,6 @@ int wpa_auth_resend_m3(struct wpa_state_machine *sm,
 int wpa_auth_resend_group_m1(struct wpa_state_machine *sm,
 			     void (*cb)(void *ctx1, void *ctx2),
 			     void *ctx1, void *ctx2);
+int wpa_auth_rekey_gtk(struct wpa_authenticator *wpa_auth);
 
 #endif /* WPA_AUTH_H */

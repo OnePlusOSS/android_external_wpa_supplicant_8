@@ -108,6 +108,7 @@ void hostapd_config_defaults_bss(struct hostapd_bss_config *bss)
 	bss->radius_das_time_window = 300;
 
 	bss->sae_anti_clogging_threshold = 5;
+	bss->sae_sync = 5;
 
 	bss->gas_frag_limit = 1400;
 
@@ -576,6 +577,7 @@ void hostapd_config_free_bss(struct hostapd_bss_config *conf)
 
 	os_free(conf->roaming_consortium);
 	os_free(conf->venue_name);
+	os_free(conf->venue_url);
 	os_free(conf->nai_realm_data);
 	os_free(conf->network_auth_type);
 	os_free(conf->anqp_3gpp_cell_net);
@@ -936,7 +938,9 @@ static int hostapd_config_check_bss(struct hostapd_bss_config *bss,
 
 	if (full_config && bss->wps_state && bss->wpa &&
 	    (!(bss->wpa & 2) ||
-	     !(bss->rsn_pairwise & (WPA_CIPHER_CCMP | WPA_CIPHER_GCMP)))) {
+	     !(bss->rsn_pairwise & (WPA_CIPHER_CCMP | WPA_CIPHER_GCMP |
+				    WPA_CIPHER_CCMP_256 |
+				    WPA_CIPHER_GCMP_256)))) {
 		wpa_printf(MSG_INFO, "WPS: WPA/TKIP configuration without "
 			   "WPA2/CCMP/GCMP forced WPS to be disabled");
 		bss->wps_state = 0;
@@ -1046,8 +1050,12 @@ void hostapd_set_security_params(struct hostapd_bss_config *bss,
 
 	if ((bss->wpa & 2) && bss->rsn_pairwise == 0)
 		bss->rsn_pairwise = bss->wpa_pairwise;
-	bss->wpa_group = wpa_select_ap_group_cipher(bss->wpa, bss->wpa_pairwise,
-						    bss->rsn_pairwise);
+	if (bss->group_cipher)
+		bss->wpa_group = bss->group_cipher;
+	else
+		bss->wpa_group = wpa_select_ap_group_cipher(bss->wpa,
+							    bss->wpa_pairwise,
+							    bss->rsn_pairwise);
 	if (!bss->wpa_group_rekey_set)
 		bss->wpa_group_rekey = bss->wpa_group == WPA_CIPHER_TKIP ?
 			600 : 86400;

@@ -113,11 +113,49 @@ static int hostapd_config_read_vlan_file(struct hostapd_bss_config *bss,
 #endif /* CONFIG_NO_VLAN */
 
 
-static int hostapd_acl_comp(const void *a, const void *b)
+int hostapd_acl_comp(const void *a, const void *b)
 {
 	const struct mac_acl_entry *aa = a;
 	const struct mac_acl_entry *bb = b;
 	return os_memcmp(aa->addr, bb->addr, sizeof(macaddr));
+}
+
+
+int hostapd_add_acl_maclist(struct mac_acl_entry **acl, int *num,
+			    int vlan_id, const u8 *addr)
+{
+	struct mac_acl_entry *newacl;
+
+	newacl = os_realloc_array(*acl, *num + 1, sizeof(**acl));
+	if (!newacl) {
+		wpa_printf(MSG_ERROR, "MAC list reallocation failed");
+		return -1;
+	}
+
+	*acl = newacl;
+	os_memcpy((*acl)[*num].addr, addr, ETH_ALEN);
+	os_memset(&(*acl)[*num].vlan_id, 0, sizeof((*acl)[*num].vlan_id));
+	(*acl)[*num].vlan_id.untagged = vlan_id;
+	(*acl)[*num].vlan_id.notempty = !!vlan_id;
+	(*num)++;
+
+	return 0;
+}
+
+
+void hostapd_remove_acl_mac(struct mac_acl_entry **acl, int *num,
+			    const u8 *addr)
+{
+	int i = 0;
+
+	while (i < *num) {
+		if (os_memcmp((*acl)[i].addr, addr, ETH_ALEN) == 0) {
+			os_remove_in_array(*acl, *num, sizeof(**acl), i);
+			(*num)--;
+		} else {
+			i++;
+		}
+	}
 }
 
 
@@ -128,7 +166,6 @@ static int hostapd_config_read_maclist(const char *fname,
 	char buf[128], *pos;
 	int line = 0;
 	u8 addr[ETH_ALEN];
-	struct mac_acl_entry *newacl;
 	int vlan_id;
 
 	f = fopen(fname, "r");
@@ -138,7 +175,7 @@ static int hostapd_config_read_maclist(const char *fname,
 	}
 
 	while (fgets(buf, sizeof(buf), f)) {
-		int i, rem = 0;
+		int rem = 0;
 
 		line++;
 
@@ -168,16 +205,7 @@ static int hostapd_config_read_maclist(const char *fname,
 		}
 
 		if (rem) {
-			i = 0;
-			while (i < *num) {
-				if (os_memcmp((*acl)[i].addr, addr, ETH_ALEN) ==
-				    0) {
-					os_remove_in_array(*acl, *num,
-							   sizeof(**acl), i);
-					(*num)--;
-				} else
-					i++;
-			}
+			hostapd_remove_acl_mac(acl, num, addr);
 			continue;
 		}
 		vlan_id = 0;
@@ -189,20 +217,10 @@ static int hostapd_config_read_maclist(const char *fname,
 		if (*pos != '\0')
 			vlan_id = atoi(pos);
 
-		newacl = os_realloc_array(*acl, *num + 1, sizeof(**acl));
-		if (newacl == NULL) {
-			wpa_printf(MSG_ERROR, "MAC list reallocation failed");
+		if (hostapd_add_acl_maclist(acl, num, vlan_id, addr) < 0) {
 			fclose(f);
 			return -1;
 		}
-
-		*acl = newacl;
-		os_memcpy((*acl)[*num].addr, addr, ETH_ALEN);
-		os_memset(&(*acl)[*num].vlan_id, 0,
-			  sizeof((*acl)[*num].vlan_id));
-		(*acl)[*num].vlan_id.untagged = vlan_id;
-		(*acl)[*num].vlan_id.notempty = !!vlan_id;
-		(*num)++;
 	}
 
 	fclose(f);
@@ -1358,6 +1376,44 @@ static int parse_venue_name(struct hostapd_bss_config *bss, char *pos,
 }
 
 
+static int parse_venue_url(struct hostapd_bss_config *bss, char *pos,
+			    int line)
+{
+	char *sep;
+	size_t nlen;
+	struct hostapd_venue_url *url;
+	int ret = -1;
+
+	sep = os_strchr(pos, ':');
+	if (!sep)
+		goto fail;
+	*sep++ = '\0';
+
+	nlen = os_strlen(sep);
+	if (nlen > 254)
+		goto fail;
+
+	url = os_realloc_array(bss->venue_url, bss->venue_url_count + 1,
+			       sizeof(struct hostapd_venue_url));
+	if (!url)
+		goto fail;
+
+	bss->venue_url = url;
+	url = &bss->venue_url[bss->venue_url_count++];
+
+	url->venue_number = atoi(pos);
+	url->url_len = nlen;
+	os_memcpy(url->url, sep, nlen);
+
+	ret = 0;
+fail:
+	if (ret)
+		wpa_printf(MSG_ERROR, "Line %d: Invalid venue_url '%s'",
+			   line, pos);
+	return ret;
+}
+
+
 static int parse_3gpp_cell_net(struct hostapd_bss_config *bss, char *buf,
 			       int line)
 {
@@ -2314,8 +2370,10 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 	} else if (os_strcmp(buf, "pwd_group") == 0) {
 		bss->pwd_group = atoi(pos);
 #endif /* EAP_SERVER_PWD */
+#ifdef CONFIG_ERP
 	} else if (os_strcmp(buf, "eap_server_erp") == 0) {
 		bss->eap_server_erp = atoi(pos);
+#endif /* CONFIG_ERP */
 #endif /* EAP_SERVER */
 	} else if (os_strcmp(buf, "eap_message") == 0) {
 		char *term;
@@ -2643,6 +2701,20 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				   line, pos);
 			return 1;
 		}
+	} else if (os_strcmp(buf, "group_cipher") == 0) {
+		bss->group_cipher = hostapd_config_parse_cipher(line, pos);
+		if (bss->group_cipher == -1 || bss->group_cipher == 0)
+			return 1;
+		if (bss->group_cipher != WPA_CIPHER_TKIP &&
+		    bss->group_cipher != WPA_CIPHER_CCMP &&
+		    bss->group_cipher != WPA_CIPHER_GCMP &&
+		    bss->group_cipher != WPA_CIPHER_GCMP_256 &&
+		    bss->group_cipher != WPA_CIPHER_CCMP_256) {
+			wpa_printf(MSG_ERROR,
+				   "Line %d: unsupported group cipher suite '%s'",
+				   line, pos);
+			return 1;
+		}
 #ifdef CONFIG_RSN_PREAUTH
 	} else if (os_strcmp(buf, "rsn_preauth") == 0) {
 		bss->rsn_preauth = atoi(pos);
@@ -2840,14 +2912,25 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 		}
 		bss->dtim_period = val;
 	} else if (os_strcmp(buf, "bss_load_update_period") == 0) {
-		bss->bss_load_update_period = atoi(pos);
-		if (bss->bss_load_update_period < 0 ||
-		    bss->bss_load_update_period > 100) {
+		int val = atoi(pos);
+
+		if (val < 0 || val > 100) {
 			wpa_printf(MSG_ERROR,
 				   "Line %d: invalid bss_load_update_period %d",
-				   line, bss->bss_load_update_period);
+				   line, val);
 			return 1;
 		}
+		bss->bss_load_update_period = val;
+	} else if (os_strcmp(buf, "chan_util_avg_period") == 0) {
+		int val = atoi(pos);
+
+		if (val < 0) {
+			wpa_printf(MSG_ERROR,
+				   "Line %d: invalid chan_util_avg_period",
+				   line);
+			return 1;
+		}
+		bss->chan_util_avg_period = val;
 	} else if (os_strcmp(buf, "rts_threshold") == 0) {
 		conf->rts_threshold = atoi(pos);
 		if (conf->rts_threshold < -1 || conf->rts_threshold > 65535) {
@@ -3293,6 +3376,8 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 #ifdef CONFIG_WNM_AP
 	} else if (os_strcmp(buf, "wnm_sleep_mode") == 0) {
 		bss->wnm_sleep_mode = atoi(pos);
+	} else if (os_strcmp(buf, "wnm_sleep_mode_no_keys") == 0) {
+		bss->wnm_sleep_mode_no_keys = atoi(pos);
 	} else if (os_strcmp(buf, "bss_transition") == 0) {
 		bss->bss_transition = atoi(pos);
 #endif /* CONFIG_WNM_AP */
@@ -3332,6 +3417,9 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			return 1;
 	} else if (os_strcmp(buf, "venue_name") == 0) {
 		if (parse_venue_name(bss, pos, line) < 0)
+			return 1;
+	} else if (os_strcmp(buf, "venue_url") == 0) {
+		if (parse_venue_url(bss, pos, line) < 0)
 			return 1;
 	} else if (os_strcmp(buf, "network_auth_type") == 0) {
 		u8 auth_type;
@@ -3607,6 +3695,8 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 			return 1;
 	} else if (os_strcmp(buf, "sae_anti_clogging_threshold") == 0) {
 		bss->sae_anti_clogging_threshold = atoi(pos);
+	} else if (os_strcmp(buf, "sae_sync") == 0) {
+		bss->sae_sync = atoi(pos);
 	} else if (os_strcmp(buf, "sae_groups") == 0) {
 		if (hostapd_parse_intlist(&bss->sae_groups, pos)) {
 			wpa_printf(MSG_ERROR,
@@ -3614,6 +3704,8 @@ static int hostapd_config_fill(struct hostapd_config *conf,
 				   line, pos);
 			return 1;
 		}
+	} else if (os_strcmp(buf, "sae_require_mfp") == 0) {
+		bss->sae_require_mfp = atoi(pos);
 	} else if (os_strcmp(buf, "local_pwr_constraint") == 0) {
 		int val = atoi(pos);
 		if (val < 0 || val > 255) {

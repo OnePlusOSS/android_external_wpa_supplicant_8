@@ -2451,7 +2451,8 @@ static int suiteb_cert_cb(SSL *ssl, void *arg)
 #endif /* CONFIG_SUITEB */
 
 
-static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags)
+static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags,
+			      const char *openssl_ciphers)
 {
 	SSL *ssl = conn->ssl;
 
@@ -2481,10 +2482,20 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags)
 		SSL_clear_options(ssl, SSL_OP_NO_TLSv1_2);
 #endif /* SSL_OP_NO_TLSv1_2 */
 #ifdef CONFIG_SUITEB
+#ifdef OPENSSL_IS_BORINGSSL
+	/* Start with defaults from BoringSSL */
+	SSL_CTX_set_verify_algorithm_prefs(conn->ssl_ctx, NULL, 0);
+#endif /* OPENSSL_IS_BORINGSSL */
 #if OPENSSL_VERSION_NUMBER >= 0x10002000L
 	if (flags & TLS_CONN_SUITEB_NO_ECDH) {
 		const char *ciphers = "DHE-RSA-AES256-GCM-SHA384";
 
+		if (openssl_ciphers) {
+			wpa_printf(MSG_DEBUG,
+				   "OpenSSL: Override ciphers for Suite B (no ECDH): %s",
+				   openssl_ciphers);
+			ciphers = openssl_ciphers;
+		}
 		if (SSL_set_cipher_list(ssl, ciphers) != 1) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to set Suite B ciphers");
@@ -2494,14 +2505,21 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags)
 		EC_KEY *ecdh;
 		const char *ciphers =
 			"ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384";
+		int nid[1] = { NID_secp384r1 };
 
+		if (openssl_ciphers) {
+			wpa_printf(MSG_DEBUG,
+				   "OpenSSL: Override ciphers for Suite B: %s",
+				   openssl_ciphers);
+			ciphers = openssl_ciphers;
+		}
 		if (SSL_set_cipher_list(ssl, ciphers) != 1) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to set Suite B ciphers");
 			return -1;
 		}
 
-		if (SSL_set1_curves_list(ssl, "P-384") != 1) {
+		if (SSL_set1_curves(ssl, nid, 1) != 1) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to set Suite B curves");
 			return -1;
@@ -2517,12 +2535,23 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags)
 		EC_KEY_free(ecdh);
 	}
 	if (flags & (TLS_CONN_SUITEB | TLS_CONN_SUITEB_NO_ECDH)) {
+#ifdef OPENSSL_IS_BORINGSSL
+		uint16_t sigalgs[1] = { SSL_SIGN_RSA_PKCS1_SHA384 };
+
+		if (SSL_CTX_set_verify_algorithm_prefs(conn->ssl_ctx, sigalgs,
+						       1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set Suite B sigalgs");
+			return -1;
+		}
+#else /* OPENSSL_IS_BORINGSSL */
 		/* ECDSA+SHA384 if need to add EC support here */
 		if (SSL_set1_sigalgs_list(ssl, "RSA+SHA384") != 1) {
 			wpa_printf(MSG_INFO,
 				   "OpenSSL: Failed to set Suite B sigalgs");
 			return -1;
 		}
+#endif /* OPENSSL_IS_BORINGSSL */
 
 		SSL_set_options(ssl, SSL_OP_NO_TLSv1);
 		SSL_set_options(ssl, SSL_OP_NO_TLSv1_1);
@@ -2535,6 +2564,26 @@ static int tls_set_conn_flags(struct tls_connection *conn, unsigned int flags)
 		return -1;
 	}
 #endif /* OPENSSL_VERSION_NUMBER */
+
+#ifdef OPENSSL_IS_BORINGSSL
+	if (openssl_ciphers && os_strcmp(openssl_ciphers, "SUITEB192") == 0) {
+		uint16_t sigalgs[1] = { SSL_SIGN_ECDSA_SECP384R1_SHA384 };
+		int nid[1] = { NID_secp384r1 };
+
+		if (SSL_set1_curves(ssl, nid, 1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set Suite B curves");
+			return -1;
+		}
+
+		if (SSL_CTX_set_verify_algorithm_prefs(conn->ssl_ctx, sigalgs,
+						       1) != 1) {
+			wpa_printf(MSG_INFO,
+				   "OpenSSL: Failed to set Suite B sigalgs");
+			return -1;
+		}
+	}
+#endif /* OPENSSL_IS_BORINGSSL */
 #endif /* CONFIG_SUITEB */
 
 	return 0;
@@ -2561,7 +2610,7 @@ int tls_connection_set_verify(void *ssl_ctx, struct tls_connection *conn,
 		SSL_set_verify(conn->ssl, SSL_VERIFY_NONE, NULL);
 	}
 
-	if (tls_set_conn_flags(conn, flags) < 0)
+	if (tls_set_conn_flags(conn, flags, NULL) < 0)
 		return -1;
 	conn->flags = flags;
 
@@ -2699,16 +2748,6 @@ static int tls_global_client_cert(struct tls_data *data,
 	wpa_printf(MSG_DEBUG, "OpenSSL: %s - OPENSSL_NO_STDIO", __func__);
 	return -1;
 #endif /* OPENSSL_NO_STDIO */
-}
-
-
-static int tls_passwd_cb(char *buf, int size, int rwflag, void *password)
-{
-	if (password == NULL) {
-		return 0;
-	}
-	os_strlcpy(buf, (char *) password, size);
-	return os_strlen(buf);
 }
 
 
@@ -3030,16 +3069,61 @@ static int tls_connection_engine_private_key(struct tls_connection *conn)
 }
 
 
-static void tls_clear_default_passwd_cb(SSL_CTX *ssl_ctx, SSL *ssl)
+#ifndef OPENSSL_NO_STDIO
+static int tls_passwd_cb(char *buf, int size, int rwflag, void *password)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER) && !defined(OPENSSL_IS_BORINGSSL)
-	if (ssl) {
-		SSL_set_default_passwd_cb(ssl, NULL);
-		SSL_set_default_passwd_cb_userdata(ssl, NULL);
+	if (!password)
+		return 0;
+	os_strlcpy(buf, (const char *) password, size);
+	return os_strlen(buf);
+}
+#endif /* OPENSSL_NO_STDIO */
+
+
+static int tls_use_private_key_file(struct tls_data *data, SSL *ssl,
+				    const char *private_key,
+				    const char *private_key_passwd)
+{
+#ifndef OPENSSL_NO_STDIO
+	BIO *bio;
+	EVP_PKEY *pkey;
+	int ret;
+
+	/* First try ASN.1 (DER). */
+	bio = BIO_new_file(private_key, "r");
+	if (!bio)
+		return -1;
+	pkey = d2i_PrivateKey_bio(bio, NULL);
+	BIO_free(bio);
+
+	if (pkey) {
+		wpa_printf(MSG_DEBUG, "OpenSSL: %s (DER) --> loaded", __func__);
+	} else {
+		/* Try PEM with the provided password. */
+		bio = BIO_new_file(private_key, "r");
+		if (!bio)
+			return -1;
+		pkey = PEM_read_bio_PrivateKey(bio, NULL, tls_passwd_cb,
+					       (void *) private_key_passwd);
+		BIO_free(bio);
+		if (!pkey)
+			return -1;
+		wpa_printf(MSG_DEBUG, "OpenSSL: %s (PEM) --> loaded", __func__);
+		/* Clear errors from the previous failed load. */
+		ERR_clear_error();
 	}
-#endif /* >= 1.1.0f && !LibreSSL && !BoringSSL */
-	SSL_CTX_set_default_passwd_cb(ssl_ctx, NULL);
-	SSL_CTX_set_default_passwd_cb_userdata(ssl_ctx, NULL);
+
+	if (ssl)
+		ret = SSL_use_PrivateKey(ssl, pkey);
+	else
+		ret = SSL_CTX_use_PrivateKey(data->ssl, pkey);
+
+	EVP_PKEY_free(pkey);
+	return ret == 1 ? 0 : -1;
+#else /* OPENSSL_NO_STDIO */
+	wpa_printf(MSG_DEBUG, "OpenSSL: %s - OPENSSL_NO_STDIO", __func__);
+	return -1;
+#endif /* OPENSSL_NO_STDIO */
 }
 
 
@@ -3050,31 +3134,10 @@ static int tls_connection_private_key(struct tls_data *data,
 				      const u8 *private_key_blob,
 				      size_t private_key_blob_len)
 {
-	SSL_CTX *ssl_ctx = data->ssl;
-	char *passwd;
 	int ok;
 
 	if (private_key == NULL && private_key_blob == NULL)
 		return 0;
-
-	if (private_key_passwd) {
-		passwd = os_strdup(private_key_passwd);
-		if (passwd == NULL)
-			return -1;
-	} else
-		passwd = NULL;
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L && !defined(LIBRESSL_VERSION_NUMBER) && !defined(OPENSSL_IS_BORINGSSL)
-	/*
-	 * In OpenSSL >= 1.1.0f SSL_use_PrivateKey_file() uses the callback
-	 * from the SSL object. See OpenSSL commit d61461a75253.
-	 */
-	SSL_set_default_passwd_cb(conn->ssl, tls_passwd_cb);
-	SSL_set_default_passwd_cb_userdata(conn->ssl, passwd);
-#endif /* >= 1.1.0f && !LibreSSL && !BoringSSL */
-	/* Keep these for OpenSSL < 1.1.0f */
-	SSL_CTX_set_default_passwd_cb(ssl_ctx, tls_passwd_cb);
-	SSL_CTX_set_default_passwd_cb_userdata(ssl_ctx, passwd);
 
 	ok = 0;
 	while (private_key_blob) {
@@ -3106,7 +3169,8 @@ static int tls_connection_private_key(struct tls_data *data,
 		}
 
 		if (tls_read_pkcs12_blob(data, conn->ssl, private_key_blob,
-					 private_key_blob_len, passwd) == 0) {
+					 private_key_blob_len,
+					 private_key_passwd) == 0) {
 			wpa_printf(MSG_DEBUG, "OpenSSL: PKCS#12 as blob --> "
 				   "OK");
 			ok = 1;
@@ -3117,29 +3181,14 @@ static int tls_connection_private_key(struct tls_data *data,
 	}
 
 	while (!ok && private_key) {
-#ifndef OPENSSL_NO_STDIO
-		if (SSL_use_PrivateKey_file(conn->ssl, private_key,
-					    SSL_FILETYPE_ASN1) == 1) {
-			wpa_printf(MSG_DEBUG, "OpenSSL: "
-				   "SSL_use_PrivateKey_File (DER) --> OK");
+		if (tls_use_private_key_file(data, conn->ssl, private_key,
+					     private_key_passwd) == 0) {
 			ok = 1;
 			break;
 		}
 
-		if (SSL_use_PrivateKey_file(conn->ssl, private_key,
-					    SSL_FILETYPE_PEM) == 1) {
-			wpa_printf(MSG_DEBUG, "OpenSSL: "
-				   "SSL_use_PrivateKey_File (PEM) --> OK");
-			ok = 1;
-			break;
-		}
-#else /* OPENSSL_NO_STDIO */
-		wpa_printf(MSG_DEBUG, "OpenSSL: %s - OPENSSL_NO_STDIO",
-			   __func__);
-#endif /* OPENSSL_NO_STDIO */
-
-		if (tls_read_pkcs12(data, conn->ssl, private_key, passwd)
-		    == 0) {
+		if (tls_read_pkcs12(data, conn->ssl, private_key,
+				    private_key_passwd) == 0) {
 			wpa_printf(MSG_DEBUG, "OpenSSL: Reading PKCS#12 file "
 				   "--> OK");
 			ok = 1;
@@ -3159,13 +3208,9 @@ static int tls_connection_private_key(struct tls_data *data,
 	if (!ok) {
 		tls_show_errors(MSG_INFO, __func__,
 				"Failed to load private key");
-		tls_clear_default_passwd_cb(ssl_ctx, conn->ssl);
-		os_free(passwd);
 		return -1;
 	}
 	ERR_clear_error();
-	tls_clear_default_passwd_cb(ssl_ctx, conn->ssl);
-	os_free(passwd);
 
 	if (!SSL_check_private_key(conn->ssl)) {
 		tls_show_errors(MSG_INFO, __func__, "Private key failed "
@@ -3183,37 +3228,18 @@ static int tls_global_private_key(struct tls_data *data,
 				  const char *private_key_passwd)
 {
 	SSL_CTX *ssl_ctx = data->ssl;
-	char *passwd;
 
 	if (private_key == NULL)
 		return 0;
 
-	if (private_key_passwd) {
-		passwd = os_strdup(private_key_passwd);
-		if (passwd == NULL)
-			return -1;
-	} else
-		passwd = NULL;
-
-	SSL_CTX_set_default_passwd_cb(ssl_ctx, tls_passwd_cb);
-	SSL_CTX_set_default_passwd_cb_userdata(ssl_ctx, passwd);
-	if (
-#ifndef OPENSSL_NO_STDIO
-	    SSL_CTX_use_PrivateKey_file(ssl_ctx, private_key,
-					SSL_FILETYPE_ASN1) != 1 &&
-	    SSL_CTX_use_PrivateKey_file(ssl_ctx, private_key,
-					SSL_FILETYPE_PEM) != 1 &&
-#endif /* OPENSSL_NO_STDIO */
-	    tls_read_pkcs12(data, NULL, private_key, passwd)) {
+	if (tls_use_private_key_file(data, NULL, private_key,
+				     private_key_passwd) &&
+	    tls_read_pkcs12(data, NULL, private_key, private_key_passwd)) {
 		tls_show_errors(MSG_INFO, __func__,
 				"Failed to load private key");
-		tls_clear_default_passwd_cb(ssl_ctx, NULL);
-		os_free(passwd);
 		ERR_clear_error();
 		return -1;
 	}
-	tls_clear_default_passwd_cb(ssl_ctx, NULL);
-	os_free(passwd);
 	ERR_clear_error();
 
 	if (!SSL_CTX_check_private_key(ssl_ctx)) {
@@ -4283,6 +4309,7 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 	const char *cert_id = params->cert_id;
 	const char *ca_cert_id = params->ca_cert_id;
 	const char *engine_id = params->engine ? params->engine_id : NULL;
+	const char *ciphers;
 
 	if (conn == NULL)
 		return -1;
@@ -4333,6 +4360,15 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 					"Failed to set TLSv1_method() for EAP-FAST");
 			return -1;
 		}
+	}
+#endif
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
+	if (params->flags & TLS_CONN_EAP_FAST) {
+		/* Need to disable TLS v1.3 at least for now since OpenSSL 1.1.1
+		 * refuses to start the handshake with the modified ciphersuite
+		 * list (no TLS v1.3 ciphersuites included) for EAP-FAST. */
+		wpa_printf(MSG_DEBUG, "OpenSSL: Disable TLSv1.3 for EAP-FAST");
+		SSL_set_options(conn->ssl, SSL_OP_NO_TLSv1_3);
 	}
 #endif
 #endif /* EAP_FAST || EAP_FAST_DYNAMIC || EAP_SERVER_FAST */
@@ -4393,15 +4429,26 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 		return -1;
 	}
 
-	if (params->openssl_ciphers &&
-	    SSL_set_cipher_list(conn->ssl, params->openssl_ciphers) != 1) {
+	ciphers = params->openssl_ciphers;
+#ifdef CONFIG_SUITEB
+#ifdef OPENSSL_IS_BORINGSSL
+	if (ciphers && os_strcmp(ciphers, "SUITEB192") == 0) {
+		/* BoringSSL removed support for SUITEB192, so need to handle
+		 * this with hardcoded ciphersuite and additional checks for
+		 * other parameters. */
+		ciphers = "ECDHE-ECDSA-AES256-GCM-SHA384";
+	}
+#endif /* OPENSSL_IS_BORINGSSL */
+#endif /* CONFIG_SUITEB */
+	if (ciphers && SSL_set_cipher_list(conn->ssl, ciphers) != 1) {
 		wpa_printf(MSG_INFO,
 			   "OpenSSL: Failed to set cipher string '%s'",
-			   params->openssl_ciphers);
+			   ciphers);
 		return -1;
 	}
 
-	if (tls_set_conn_flags(conn, params->flags) < 0)
+	if (tls_set_conn_flags(conn, params->flags,
+			       params->openssl_ciphers) < 0)
 		return -1;
 
 #ifdef OPENSSL_IS_BORINGSSL

@@ -201,6 +201,12 @@ struct hostapd_lang_string {
 	u8 name[252];
 };
 
+struct hostapd_venue_url {
+	u8 venue_number;
+	u8 url_len;
+	u8 url[254];
+};
+
 #define MAX_NAI_REALMS 10
 #define MAX_NAI_REALMLEN 255
 #define MAX_NAI_EAP_METHODS 5
@@ -248,7 +254,8 @@ struct hostapd_bss_config {
 	int max_num_sta; /* maximum number of STAs in station table */
 
 	int dtim_period;
-	int bss_load_update_period;
+	unsigned int bss_load_update_period;
+	unsigned int chan_util_avg_period;
 
 	int ieee802_1x; /* use IEEE 802.1X */
 	int eapol_version;
@@ -325,6 +332,7 @@ struct hostapd_bss_config {
 		PSK_RADIUS_REQUIRED = 2
 	} wpa_psk_radius;
 	int wpa_pairwise;
+	int group_cipher; /* wpa_group value override from configuation */
 	int wpa_group;
 	int wpa_group_rekey;
 	int wpa_group_rekey_set;
@@ -479,6 +487,7 @@ struct hostapd_bss_config {
 	int time_advertisement;
 	char *time_zone;
 	int wnm_sleep_mode;
+	int wnm_sleep_mode_no_keys;
 	int bss_transition;
 
 	/* IEEE 802.11u - Interworking */
@@ -500,6 +509,10 @@ struct hostapd_bss_config {
 	/* IEEE 802.11u - Venue Name duples */
 	unsigned int venue_name_count;
 	struct hostapd_lang_string *venue_name;
+
+	/* Venue URL duples */
+	unsigned int venue_url_count;
+	struct hostapd_venue_url *venue_url;
 
 	/* IEEE 802.11u - Network Authentication Type */
 	u8 *network_auth_type;
@@ -581,6 +594,8 @@ struct hostapd_bss_config {
 	struct wpabuf *assocresp_elements;
 
 	unsigned int sae_anti_clogging_threshold;
+	unsigned int sae_sync;
+	int sae_require_mfp;
 	int *sae_groups;
 	char *sae_password;
 

@@ -464,7 +464,8 @@ struct wpa_config * wpa_config_read(const char *name, struct wpa_config *cfgp)
 
 #ifndef WPA_IGNORE_CONFIG_ERRORS
 	if (errors) {
-		wpa_config_free(config);
+		if (config != cfgp)
+			wpa_config_free(config);
 		config = NULL;
 		head = NULL;
 	}
@@ -875,6 +876,7 @@ static void wpa_config_write_network(FILE *f, struct wpa_ssid *ssid)
 	STR(dpp_csign);
 #endif /* CONFIG_DPP */
 	INT(owe_group);
+	INT(owe_only);
 #ifdef CONFIG_HT_OVERRIDES
 	INT_DEF(disable_ht, DEFAULT_DISABLE_HT);
 	INT_DEF(disable_ht40, DEFAULT_DISABLE_HT40);
@@ -1280,6 +1282,8 @@ static void wpa_config_write_global(FILE *f, struct wpa_config *config)
 		fprintf(f, "filter_rssi=%d\n", config->filter_rssi);
 	if (config->max_num_sta != DEFAULT_MAX_NUM_STA)
 		fprintf(f, "max_num_sta=%u\n", config->max_num_sta);
+	if (config->ap_isolate != DEFAULT_AP_ISOLATE)
+		fprintf(f, "ap_isolate=%u\n", config->ap_isolate);
 	if (config->disassoc_low_ack)
 		fprintf(f, "disassoc_low_ack=%d\n", config->disassoc_low_ack);
 #ifdef CONFIG_HS20

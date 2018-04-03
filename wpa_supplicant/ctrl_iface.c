@@ -20,6 +20,9 @@
 #include "common/ieee802_11_defs.h"
 #include "common/ieee802_11_common.h"
 #include "common/wpa_ctrl.h"
+#ifdef CONFIG_DPP
+#include "common/dpp.h"
+#endif /* CONFIG_DPP */
 #include "crypto/tls.h"
 #include "ap/hostapd.h"
 #include "eap_peer/eap.h"
@@ -604,6 +607,54 @@ static int wpa_supplicant_ctrl_iface_set(struct wpa_supplicant *wpa_s,
 	} else if (os_strcasecmp(cmd, "dpp_configurator_params") == 0) {
 		os_free(wpa_s->dpp_configurator_params);
 		wpa_s->dpp_configurator_params = os_strdup(value);
+	} else if (os_strcasecmp(cmd, "dpp_init_max_tries") == 0) {
+		wpa_s->dpp_init_max_tries = atoi(value);
+	} else if (os_strcasecmp(cmd, "dpp_init_retry_time") == 0) {
+		wpa_s->dpp_init_retry_time = atoi(value);
+	} else if (os_strcasecmp(cmd, "dpp_resp_wait_time") == 0) {
+		wpa_s->dpp_resp_wait_time = atoi(value);
+	} else if (os_strcasecmp(cmd, "dpp_resp_max_tries") == 0) {
+		wpa_s->dpp_resp_max_tries = atoi(value);
+	} else if (os_strcasecmp(cmd, "dpp_resp_retry_time") == 0) {
+		wpa_s->dpp_resp_retry_time = atoi(value);
+#ifdef CONFIG_TESTING_OPTIONS
+	} else if (os_strcasecmp(cmd, "dpp_pkex_own_mac_override") == 0) {
+		if (hwaddr_aton(value, dpp_pkex_own_mac_override))
+			ret = -1;
+	} else if (os_strcasecmp(cmd, "dpp_pkex_peer_mac_override") == 0) {
+		if (hwaddr_aton(value, dpp_pkex_peer_mac_override))
+			ret = -1;
+	} else if (os_strcasecmp(cmd, "dpp_pkex_ephemeral_key_override") == 0) {
+		size_t hex_len = os_strlen(value);
+
+		if (hex_len >
+		    2 * sizeof(dpp_pkex_ephemeral_key_override))
+			ret = -1;
+		else if (hexstr2bin(value, dpp_pkex_ephemeral_key_override,
+				    hex_len / 2))
+			ret = -1;
+		else
+			dpp_pkex_ephemeral_key_override_len = hex_len / 2;
+	} else if (os_strcasecmp(cmd, "dpp_protocol_key_override") == 0) {
+		size_t hex_len = os_strlen(value);
+
+		if (hex_len > 2 * sizeof(dpp_protocol_key_override))
+			ret = -1;
+		else if (hexstr2bin(value, dpp_protocol_key_override,
+				    hex_len / 2))
+			ret = -1;
+		else
+			dpp_protocol_key_override_len = hex_len / 2;
+	} else if (os_strcasecmp(cmd, "dpp_nonce_override") == 0) {
+		size_t hex_len = os_strlen(value);
+
+		if (hex_len > 2 * sizeof(dpp_nonce_override))
+			ret = -1;
+		else if (hexstr2bin(value, dpp_nonce_override, hex_len / 2))
+			ret = -1;
+		else
+			dpp_nonce_override_len = hex_len / 2;
+#endif /* CONFIG_TESTING_OPTIONS */
 #endif /* CONFIG_DPP */
 #ifdef CONFIG_TESTING_OPTIONS
 	} else if (os_strcasecmp(cmd, "ext_mgmt_frame_handling") == 0) {
@@ -645,18 +696,35 @@ static int wpa_supplicant_ctrl_iface_set(struct wpa_supplicant *wpa_s,
 #ifdef CONFIG_DPP
 	} else if (os_strcasecmp(cmd, "dpp_config_obj_override") == 0) {
 		os_free(wpa_s->dpp_config_obj_override);
-		wpa_s->dpp_config_obj_override = os_strdup(value);
+		if (value[0] == '\0')
+			wpa_s->dpp_config_obj_override = NULL;
+		else
+			wpa_s->dpp_config_obj_override = os_strdup(value);
 	} else if (os_strcasecmp(cmd, "dpp_discovery_override") == 0) {
 		os_free(wpa_s->dpp_discovery_override);
-		wpa_s->dpp_discovery_override = os_strdup(value);
+		if (value[0] == '\0')
+			wpa_s->dpp_discovery_override = NULL;
+		else
+			wpa_s->dpp_discovery_override = os_strdup(value);
 	} else if (os_strcasecmp(cmd, "dpp_groups_override") == 0) {
 		os_free(wpa_s->dpp_groups_override);
-		wpa_s->dpp_groups_override = os_strdup(value);
+		if (value[0] == '\0')
+			wpa_s->dpp_groups_override = NULL;
+		else
+			wpa_s->dpp_groups_override = os_strdup(value);
 	} else if (os_strcasecmp(cmd,
 				 "dpp_ignore_netaccesskey_mismatch") == 0) {
 		wpa_s->dpp_ignore_netaccesskey_mismatch = atoi(value);
+	} else if (os_strcasecmp(cmd, "dpp_test") == 0) {
+		dpp_test = atoi(value);
 #endif /* CONFIG_DPP */
 #endif /* CONFIG_TESTING_OPTIONS */
+#ifdef CONFIG_FILS
+	} else if (os_strcasecmp(cmd, "disable_fils") == 0) {
+		wpa_s->disable_fils = !!atoi(value);
+		wpa_drv_disable_fils(wpa_s, wpa_s->disable_fils);
+		wpa_supplicant_set_default_scan_ies(wpa_s);
+#endif /* CONFIG_FILS */
 #ifndef CONFIG_NO_CONFIG_BLOBS
 	} else if (os_strcmp(cmd, "blob") == 0) {
 		ret = wpas_ctrl_set_blob(wpa_s, value);
@@ -6229,12 +6297,20 @@ static int p2p_ctrl_group_add(struct wpa_supplicant *wpa_s, char *cmd)
 	int ht40 = wpa_s->conf->p2p_go_ht40 || vht;
 	int max_oper_chwidth, chwidth = 0, freq2 = 0;
 	char *token, *context = NULL;
+#ifdef CONFIG_ACS
+	int acs = 0;
+#endif /* CONFIG_ACS */
 
 	while ((token = str_token(cmd, " ", &context))) {
-		if (sscanf(token, "freq=%d", &freq) == 1 ||
-		    sscanf(token, "freq2=%d", &freq2) == 1 ||
+		if (sscanf(token, "freq2=%d", &freq2) == 1 ||
 		    sscanf(token, "persistent=%d", &group_id) == 1 ||
 		    sscanf(token, "max_oper_chwidth=%d", &chwidth) == 1) {
+			continue;
+#ifdef CONFIG_ACS
+		} else if (os_strcmp(token, "freq=acs") == 0) {
+			acs = 1;
+#endif /* CONFIG_ACS */
+		} else if (sscanf(token, "freq=%d", &freq) == 1) {
 			continue;
 		} else if (os_strcmp(token, "ht40") == 0) {
 			ht40 = 1;
@@ -6250,6 +6326,24 @@ static int p2p_ctrl_group_add(struct wpa_supplicant *wpa_s, char *cmd)
 			return -1;
 		}
 	}
+
+#ifdef CONFIG_ACS
+	if ((wpa_s->drv_flags & WPA_DRIVER_FLAGS_ACS_OFFLOAD) &&
+	    (acs || freq == 2 || freq == 5)) {
+		if (freq == 2 && wpa_s->best_24_freq <= 0) {
+			wpa_s->p2p_go_acs_band = HOSTAPD_MODE_IEEE80211G;
+			wpa_s->p2p_go_do_acs = 1;
+			freq = 0;
+		} else if (freq == 5 && wpa_s->best_5_freq <= 0) {
+			wpa_s->p2p_go_acs_band = HOSTAPD_MODE_IEEE80211A;
+			wpa_s->p2p_go_do_acs = 1;
+			freq = 0;
+		} else {
+			wpa_s->p2p_go_acs_band = HOSTAPD_MODE_IEEE80211ANY;
+			wpa_s->p2p_go_do_acs = 1;
+		}
+	}
+#endif /* CONFIG_ACS */
 
 	max_oper_chwidth = parse_freq(chwidth, freq2);
 	if (max_oper_chwidth < 0)
@@ -7708,6 +7802,18 @@ static void wpa_supplicant_ctrl_iface_flush(struct wpa_supplicant *wpa_s)
 
 #ifdef CONFIG_DPP
 	wpas_dpp_deinit(wpa_s);
+	wpa_s->dpp_init_max_tries = 0;
+	wpa_s->dpp_init_retry_time = 0;
+	wpa_s->dpp_resp_wait_time = 0;
+	wpa_s->dpp_resp_max_tries = 0;
+	wpa_s->dpp_resp_retry_time = 0;
+#ifdef CONFIG_TESTING_OPTIONS
+	os_memset(dpp_pkex_own_mac_override, 0, ETH_ALEN);
+	os_memset(dpp_pkex_peer_mac_override, 0, ETH_ALEN);
+	dpp_pkex_ephemeral_key_override_len = 0;
+	dpp_protocol_key_override_len = 0;
+	dpp_nonce_override_len = 0;
+#endif /* CONFIG_TESTING_OPTIONS */
 #endif /* CONFIG_DPP */
 
 #ifdef CONFIG_TDLS
@@ -7778,6 +7884,15 @@ static void wpa_supplicant_ctrl_iface_flush(struct wpa_supplicant *wpa_s)
 	wpa_s->get_pref_freq_list_override = NULL;
 	wpabuf_free(wpa_s->sae_commit_override);
 	wpa_s->sae_commit_override = NULL;
+#ifdef CONFIG_DPP
+	os_free(wpa_s->dpp_config_obj_override);
+	wpa_s->dpp_config_obj_override = NULL;
+	os_free(wpa_s->dpp_discovery_override);
+	wpa_s->dpp_discovery_override = NULL;
+	os_free(wpa_s->dpp_groups_override);
+	wpa_s->dpp_groups_override = NULL;
+	dpp_test = DPP_TEST_DISABLED;
+#endif /* CONFIG_DPP */
 #endif /* CONFIG_TESTING_OPTIONS */
 
 	wpa_s->disconnected = 0;
@@ -10442,6 +10557,7 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 		if (wpas_dpp_listen(wpa_s, buf + 11) < 0)
 			reply_len = -1;
 	} else if (os_strcmp(buf, "DPP_STOP_LISTEN") == 0) {
+		wpas_dpp_stop(wpa_s);
 		wpas_dpp_listen_stop(wpa_s);
 	} else if (os_strncmp(buf, "DPP_CONFIGURATOR_ADD", 20) == 0) {
 		int res;
@@ -10460,6 +10576,9 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 	} else if (os_strncmp(buf, "DPP_CONFIGURATOR_SIGN ", 22) == 0) {
 		if (wpas_dpp_configurator_sign(wpa_s, buf + 22) < 0)
 			reply_len = -1;
+	} else if (os_strncmp(buf, "DPP_CONFIGURATOR_GET_KEY ", 25) == 0) {
+		reply_len = wpas_dpp_configurator_get_key(wpa_s, atoi(buf + 25),
+							  reply, reply_size);
 	} else if (os_strncmp(buf, "DPP_PKEX_ADD ", 13) == 0) {
 		int res;
 
