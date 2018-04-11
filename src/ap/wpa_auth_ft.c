@@ -1459,6 +1459,11 @@ static int wpa_ft_pull_pmk_r1(struct wpa_state_machine *sm,
 			    sm->r0kh_id, sm->r0kh_id_len);
 		return -1;
 	}
+	if (os_memcmp(r0kh->addr, sm->wpa_auth->addr, ETH_ALEN) == 0) {
+		wpa_printf(MSG_DEBUG,
+			   "FT: R0KH-ID points to self - no matching key available");
+		return -1;
+	}
 
 	key = r0kh->key;
 	key_len = sizeof(r0kh->key);
@@ -1801,6 +1806,8 @@ u8 * wpa_sm_write_assoc_resp_ies(struct wpa_state_machine *sm, u8 *pos,
 	struct wpa_ft_ies parse;
 	u8 *ric_start;
 	u8 *anonce, *snonce;
+	const u8 *kck;
+	size_t kck_len;
 
 	if (sm == NULL)
 		return pos;
@@ -1893,9 +1900,15 @@ u8 * wpa_sm_write_assoc_resp_ies(struct wpa_state_machine *sm, u8 *pos,
 	if (ric_start == pos)
 		ric_start = NULL;
 
+	if (wpa_key_mgmt_fils(sm->wpa_key_mgmt)) {
+		kck = sm->PTK.kck2;
+		kck_len = sm->PTK.kck2_len;
+	} else {
+		kck = sm->PTK.kck;
+		kck_len = sm->PTK.kck_len;
+	}
 	if (auth_alg == WLAN_AUTH_FT &&
-	    wpa_ft_mic(sm->PTK.kck, sm->PTK.kck_len, sm->addr,
-		       sm->wpa_auth->addr, 6,
+	    wpa_ft_mic(kck, kck_len, sm->addr, sm->wpa_auth->addr, 6,
 		       mdie, mdie_len, ftie, ftie_len,
 		       rsnie, rsnie_len,
 		       ric_start, ric_start ? pos - ric_start : 0,
@@ -2050,6 +2063,43 @@ static int wpa_ft_set_key_mgmt(struct wpa_state_machine *sm,
 }
 
 
+static int wpa_ft_local_derive_pmk_r1(struct wpa_authenticator *wpa_auth,
+				      struct wpa_state_machine *sm,
+				      const u8 *r0kh_id, size_t r0kh_id_len,
+				      const u8 *req_pmk_r0_name,
+				      const u8 *req_pmk_r1_name,
+				      u8 *out_pmk_r1, int *out_pairwise)
+{
+	struct wpa_auth_config *conf = &wpa_auth->conf;
+	const struct wpa_ft_pmk_r0_sa *r0;
+	u8 pmk_r1_name[WPA_PMK_NAME_LEN];
+
+	if (conf->r0_key_holder_len != r0kh_id_len ||
+	    os_memcmp(conf->r0_key_holder, r0kh_id, conf->r0_key_holder_len) !=
+	    0)
+		return -1; /* not our R0KH-ID */
+
+	wpa_printf(MSG_DEBUG, "FT: STA R0KH-ID matching local configuration");
+	if (wpa_ft_fetch_pmk_r0(sm->wpa_auth, sm->addr, req_pmk_r0_name, &r0) <
+	    0)
+		return -1; /* no matching PMKR0Name in local cache */
+
+	wpa_printf(MSG_DEBUG, "FT: Requested PMKR0Name found in local cache");
+
+	if (wpa_derive_pmk_r1(r0->pmk_r0, r0->pmk_r0_name, conf->r1_key_holder,
+			      sm->addr, out_pmk_r1, pmk_r1_name) < 0)
+		return -1;
+	wpa_hexdump_key(MSG_DEBUG, "FT: PMK-R1", out_pmk_r1, PMK_LEN);
+	wpa_hexdump(MSG_DEBUG, "FT: PMKR1Name", pmk_r1_name, WPA_PMK_NAME_LEN);
+
+	wpa_ft_store_pmk_r1(wpa_auth, sm->addr, out_pmk_r1, pmk_r1_name,
+			    sm->pairwise);
+
+	*out_pairwise = sm->pairwise;
+	return 0;
+}
+
+
 static int wpa_ft_process_auth_req(struct wpa_state_machine *sm,
 				   const u8 *ies, size_t ies_len,
 				   u8 **resp_ies, size_t *resp_ies_len)
@@ -2127,8 +2177,22 @@ static int wpa_ft_process_auth_req(struct wpa_state_machine *sm,
 	    wpa_key_mgmt_ft_psk(sm->wpa_key_mgmt)) {
 		if (wpa_ft_psk_pmk_r1(sm, pmk_r1_name, pmk_r1, &pairwise) < 0)
 			return WLAN_STATUS_INVALID_PMKID;
+		wpa_printf(MSG_DEBUG,
+			   "FT: Generated PMK-R1 for FT-PSK locally");
 	} else if (wpa_ft_fetch_pmk_r1(sm->wpa_auth, sm->addr, pmk_r1_name,
 				       pmk_r1, &pairwise) < 0) {
+		wpa_printf(MSG_DEBUG,
+			   "FT: No PMK-R1 available in local cache for the requested PMKR1Name");
+		if (wpa_ft_local_derive_pmk_r1(sm->wpa_auth, sm,
+					       parse.r0kh_id, parse.r0kh_id_len,
+					       parse.rsn_pmkid,
+					       pmk_r1_name, pmk_r1, &pairwise)
+		    == 0) {
+			wpa_printf(MSG_DEBUG,
+				   "FT: Generated PMK-R1 based on local PMK-R0");
+			goto pmk_r1_derived;
+		}
+
 		if (wpa_ft_pull_pmk_r1(sm, ies, ies_len, parse.rsn_pmkid) < 0) {
 			wpa_printf(MSG_DEBUG,
 				   "FT: Did not have matching PMK-R1 and either unknown or blocked R0KH-ID or NAK from R0KH");
@@ -2136,8 +2200,11 @@ static int wpa_ft_process_auth_req(struct wpa_state_machine *sm,
 		}
 
 		return -1; /* Status pending */
+	} else {
+		wpa_printf(MSG_DEBUG, "FT: Found PMKR1Name from local cache");
 	}
 
+pmk_r1_derived:
 	wpa_hexdump_key(MSG_DEBUG, "FT: Selected PMK-R1", pmk_r1, PMK_LEN);
 	sm->pmk_r1_name_valid = 1;
 	os_memcpy(sm->pmk_r1_name, pmk_r1_name, WPA_PMK_NAME_LEN);
@@ -2251,6 +2318,8 @@ u16 wpa_ft_validate_reassoc(struct wpa_state_machine *sm, const u8 *ies,
 	u8 mic[WPA_EAPOL_KEY_MIC_MAX_LEN];
 	size_t mic_len = 16;
 	unsigned int count;
+	const u8 *kck;
+	size_t kck_len;
 
 	if (sm == NULL)
 		return WLAN_STATUS_UNSPECIFIED_FAILURE;
@@ -2364,8 +2433,14 @@ u16 wpa_ft_validate_reassoc(struct wpa_state_machine *sm, const u8 *ies,
 		return WLAN_STATUS_UNSPECIFIED_FAILURE;
 	}
 
-	if (wpa_ft_mic(sm->PTK.kck, sm->PTK.kck_len, sm->addr,
-		       sm->wpa_auth->addr, 5,
+	if (wpa_key_mgmt_fils(sm->wpa_key_mgmt)) {
+		kck = sm->PTK.kck2;
+		kck_len = sm->PTK.kck2_len;
+	} else {
+		kck = sm->PTK.kck;
+		kck_len = sm->PTK.kck_len;
+	}
+	if (wpa_ft_mic(kck, kck_len, sm->addr, sm->wpa_auth->addr, 5,
 		       parse.mdie - 2, parse.mdie_len + 2,
 		       parse.ftie - 2, parse.ftie_len + 2,
 		       parse.rsn - 2, parse.rsn_len + 2,

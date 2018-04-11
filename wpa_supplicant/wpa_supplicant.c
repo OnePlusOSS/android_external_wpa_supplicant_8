@@ -1011,7 +1011,13 @@ int wpa_supplicant_reload_configuration(struct wpa_supplicant *wpa_s)
 			"file '%s' - exiting", wpa_s->confname);
 		return -1;
 	}
-	wpa_config_read(wpa_s->confanother, conf);
+	if (wpa_s->confanother &&
+	    !wpa_config_read(wpa_s->confanother, conf)) {
+		wpa_msg(wpa_s, MSG_ERROR,
+			"Failed to parse the configuration file '%s' - exiting",
+			wpa_s->confanother);
+		return -1;
+	}
 
 	conf->changed_parameters = (unsigned int) -1;
 
@@ -1262,6 +1268,16 @@ int wpa_supplicant_set_suites(struct wpa_supplicant *wpa_s,
 						WPA_CIPHER_AES_128_CMAC;
 			}
 #endif /* CONFIG_IEEE80211W */
+#ifdef CONFIG_OWE
+			if ((ssid->key_mgmt & WPA_KEY_MGMT_OWE) &&
+			    !ssid->owe_only &&
+			    !bss_wpa && !bss_rsn && !bss_osen) {
+				wpa_supplicant_set_non_wpa_policy(wpa_s, ssid);
+				wpa_s->wpa_proto = 0;
+				*wpa_ie_len = 0;
+				return 0;
+			}
+#endif /* CONFIG_OWE */
 			wpa_dbg(wpa_s, MSG_DEBUG, "WPA: Set cipher suites "
 				"based on configuration");
 		} else
@@ -1607,7 +1623,8 @@ static void wpas_ext_capab_byte(struct wpa_supplicant *wpa_s, u8 *pos, int idx)
 		break;
 	case 9: /* Bits 72-79 */
 #ifdef CONFIG_FILS
-		*pos |= 0x01;
+		if (!wpa_s->disable_fils)
+			*pos |= 0x01;
 #endif /* CONFIG_FILS */
 		break;
 	}
@@ -2464,6 +2481,10 @@ static u8 * wpas_populate_assoc_ies(
 	}
 #endif /* CONFIG_FILS */
 #endif /* IEEE8021X_EAPOL */
+#ifdef CONFIG_SAE
+	if (wpa_s->key_mgmt & (WPA_KEY_MGMT_SAE | WPA_KEY_MGMT_FT_SAE))
+		algs = WPA_AUTH_ALG_SAE;
+#endif /* CONFIG_SAE */
 
 	wpa_dbg(wpa_s, MSG_DEBUG, "Automatic auth_alg selection: 0x%x", algs);
 	if (ssid->auth_alg) {
@@ -2609,13 +2630,28 @@ static u8 * wpas_populate_assoc_ies(
 #endif /* CONFIG_FILS */
 
 #ifdef CONFIG_OWE
+#ifdef CONFIG_TESTING_OPTIONS
+	if (get_ie_ext(wpa_ie, wpa_ie_len, WLAN_EID_EXT_OWE_DH_PARAM)) {
+		wpa_printf(MSG_INFO, "TESTING: Override OWE DH element");
+	} else
+#endif /* CONFIG_TESTING_OPTIONS */
 	if (algs == WPA_AUTH_ALG_OPEN &&
 	    ssid->key_mgmt == WPA_KEY_MGMT_OWE) {
 		struct wpabuf *owe_ie;
-		u16 group = OWE_DH_GROUP;
+		u16 group;
 
-		if (ssid->owe_group)
+		if (ssid->owe_group) {
 			group = ssid->owe_group;
+		} else {
+			if (wpa_s->last_owe_group == 19)
+				group = 20;
+			else if (wpa_s->last_owe_group == 20)
+				group = 21;
+			else
+				group = OWE_DH_GROUP;
+		}
+		wpa_s->last_owe_group = group;
+		wpa_printf(MSG_DEBUG, "OWE: Try to use group %u", group);
 		owe_ie = owe_build_assoc_req(wpa_s->wpa, group);
 		if (owe_ie &&
 		    wpabuf_len(owe_ie) <= max_wpa_ie_len - wpa_ie_len) {
@@ -3400,6 +3436,7 @@ void wpa_supplicant_select_network(struct wpa_supplicant *wpa_s,
 
 	wpa_s->disconnected = 0;
 	wpa_s->reassociate = 1;
+	wpa_s->last_owe_group = 0;
 
 	if (wpa_s->connect_without_scan ||
 	    wpa_supplicant_fast_associate(wpa_s) != 1) {
@@ -4712,7 +4749,7 @@ static void radio_work_free(struct wpa_radio_work *work)
 	if (work->started) {
 		work->wpa_s->radio->num_active_works--;
 		wpa_dbg(work->wpa_s, MSG_DEBUG,
-			"radio_work_free('%s'@%p: num_active_works --> %u",
+			"radio_work_free('%s'@%p): num_active_works --> %u",
 			work->type, work,
 			work->wpa_s->radio->num_active_works);
 	}
@@ -4916,6 +4953,22 @@ void radio_remove_works(struct wpa_supplicant *wpa_s,
 
 	/* in case we removed the started work */
 	radio_work_check_next(wpa_s);
+}
+
+
+void radio_remove_pending_work(struct wpa_supplicant *wpa_s, void *ctx)
+{
+	struct wpa_radio_work *work;
+	struct wpa_radio *radio = wpa_s->radio;
+
+	dl_list_for_each(work, &radio->work, struct wpa_radio_work, list) {
+		if (work->ctx != ctx)
+			continue;
+		wpa_dbg(wpa_s, MSG_DEBUG, "Free pending radio work '%s'@%p%s",
+			work->type, work, work->started ? " (started)" : "");
+		radio_work_free(work);
+		break;
+	}
 }
 
 
@@ -5189,7 +5242,13 @@ static int wpa_supplicant_init_iface(struct wpa_supplicant *wpa_s,
 			return -1;
 		}
 		wpa_s->confanother = os_rel2abs_path(iface->confanother);
-		wpa_config_read(wpa_s->confanother, wpa_s->conf);
+		if (wpa_s->confanother &&
+		    !wpa_config_read(wpa_s->confanother, wpa_s->conf)) {
+			wpa_printf(MSG_ERROR,
+				   "Failed to read or parse configuration '%s'.",
+				   wpa_s->confanother);
+			return -1;
+		}
 
 		/*
 		 * Override ctrl_interface and driver_param if set on command
@@ -6699,6 +6758,7 @@ void wpas_request_connection(struct wpa_supplicant *wpa_s)
 	wpa_s->extra_blacklist_count = 0;
 	wpa_s->disconnected = 0;
 	wpa_s->reassociate = 1;
+	wpa_s->last_owe_group = 0;
 
 	if (wpa_supplicant_fast_associate(wpa_s) != 1)
 		wpa_supplicant_req_scan(wpa_s, 0, 0);

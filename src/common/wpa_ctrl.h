@@ -50,10 +50,19 @@ extern "C" {
 #define WPA_EVENT_EAP_TLS_CERT_ERROR "CTRL-EVENT-EAP-TLS-CERT-ERROR "
 /** EAP status */
 #define WPA_EVENT_EAP_STATUS "CTRL-EVENT-EAP-STATUS "
+/** Retransmit the previous request packet */
+#define WPA_EVENT_EAP_RETRANSMIT "CTRL-EVENT-EAP-RETRANSMIT "
+#define WPA_EVENT_EAP_RETRANSMIT2 "CTRL-EVENT-EAP-RETRANSMIT2 "
 /** EAP authentication completed successfully */
 #define WPA_EVENT_EAP_SUCCESS "CTRL-EVENT-EAP-SUCCESS "
+#define WPA_EVENT_EAP_SUCCESS2 "CTRL-EVENT-EAP-SUCCESS2 "
 /** EAP authentication failed (EAP-Failure received) */
 #define WPA_EVENT_EAP_FAILURE "CTRL-EVENT-EAP-FAILURE "
+#define WPA_EVENT_EAP_FAILURE2 "CTRL-EVENT-EAP-FAILURE2 "
+/** EAP authentication failed due to no response received */
+#define WPA_EVENT_EAP_TIMEOUT_FAILURE "CTRL-EVENT-EAP-TIMEOUT-FAILURE "
+#define WPA_EVENT_EAP_TIMEOUT_FAILURE2 "CTRL-EVENT-EAP-TIMEOUT-FAILURE2 "
+#define WPA_EVENT_EAP_ERROR_CODE "EAP-ERROR-CODE "
 /** Network block temporarily disabled (e.g., due to authentication failure) */
 #define WPA_EVENT_TEMP_DISABLED "CTRL-EVENT-SSID-TEMP-DISABLED "
 /** Temporarily disabled network block re-enabled */
@@ -145,12 +154,15 @@ extern "C" {
 
 /* DPP events */
 #define DPP_EVENT_AUTH_SUCCESS "DPP-AUTH-SUCCESS "
+#define DPP_EVENT_AUTH_INIT_FAILED "DPP-AUTH-INIT-FAILED "
 #define DPP_EVENT_NOT_COMPATIBLE "DPP-NOT-COMPATIBLE "
 #define DPP_EVENT_RESPONSE_PENDING "DPP-RESPONSE-PENDING "
 #define DPP_EVENT_SCAN_PEER_QR_CODE "DPP-SCAN-PEER-QR-CODE "
+#define DPP_EVENT_AUTH_DIRECTION "DPP-AUTH-DIRECTION "
 #define DPP_EVENT_CONF_RECEIVED "DPP-CONF-RECEIVED "
 #define DPP_EVENT_CONF_SENT "DPP-CONF-SENT "
 #define DPP_EVENT_CONF_FAILED "DPP-CONF-FAILED "
+#define DPP_EVENT_CONFOBJ_AKM "DPP-CONFOBJ-AKM "
 #define DPP_EVENT_CONFOBJ_SSID "DPP-CONFOBJ-SSID "
 #define DPP_EVENT_CONFOBJ_PASS "DPP-CONFOBJ-PASS "
 #define DPP_EVENT_CONFOBJ_PSK "DPP-CONFOBJ-PSK "
@@ -159,6 +171,13 @@ extern "C" {
 #define DPP_EVENT_NET_ACCESS_KEY "DPP-NET-ACCESS-KEY "
 #define DPP_EVENT_MISSING_CONNECTOR "DPP-MISSING-CONNECTOR "
 #define DPP_EVENT_NETWORK_ID "DPP-NETWORK-ID "
+#define DPP_EVENT_RX "DPP-RX "
+#define DPP_EVENT_TX "DPP-TX "
+#define DPP_EVENT_TX_STATUS "DPP-TX-STATUS "
+#define DPP_EVENT_FAIL "DPP-FAIL "
+#define DPP_EVENT_PKEX_T_LIMIT "DPP-PKEX-T-LIMIT "
+#define DPP_EVENT_INTRO "DPP-INTRO "
+#define DPP_EVENT_CONF_REQ_RX "DPP-CONF-REQ-RX "
 
 /* MESH events */
 #define MESH_GROUP_STARTED "MESH-GROUP-STARTED "
@@ -323,6 +342,15 @@ extern "C" {
  */
 #define FILS_HLP_RX "FILS-HLP-RX "
 
+/* Event to indicate Probe Request frame;
+ * parameters: sa=<STA MAC address> signal=<signal> */
+#define RX_PROBE_REQUEST "RX-PROBE-REQUEST "
+
+/* Event to indicate station's HT/VHT operation mode change information */
+#define STA_OPMODE_MAX_BW_CHANGED "STA-OPMODE-MAX-BW-CHANGED "
+#define STA_OPMODE_SMPS_MODE_CHANGED "STA-OPMODE-SMPS-MODE-CHANGED "
+#define STA_OPMODE_N_SS_CHANGED "STA-OPMODE-N_SS-CHANGED "
+
 /* BSS command information masks */
 
 #define WPA_BSS_MASK_ALL		0xFFFDFFFF
@@ -424,7 +452,7 @@ void wpa_ctrl_close(struct wpa_ctrl *ctrl);
  *
  * This function is used to send commands to wpa_supplicant/hostapd. Received
  * response will be written to reply and reply_len is set to the actual length
- * of the reply. This function will block for up to two seconds while waiting
+ * of the reply. This function will block for up to 10 seconds while waiting
  * for the reply. If unsolicited messages are received, the blocking time may
  * be longer.
  *
