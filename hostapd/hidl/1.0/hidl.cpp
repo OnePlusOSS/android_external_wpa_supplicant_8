@@ -18,6 +18,9 @@ extern "C"
 #include "utils/common.h"
 #include "utils/eloop.h"
 #include "utils/includes.h"
+#ifdef CONFIG_USE_VENDOR_HIDL
+#include "hostapd_vendor.h"
+#endif /* CONFIG_USE_VENDOR_HIDL */
 }
 
 using android::hardware::configureRpcThreadpool;
@@ -29,6 +32,13 @@ using android::hardware::wifi::hostapd::V1_0::implementation::Hostapd;
 // interface in C++. So, using "C" style static globals here!
 static int hidl_fd = -1;
 static android::sp<IHostapd> service;
+
+#ifdef CONFIG_USE_VENDOR_HIDL
+using vendor::qti::hardware::wifi::hostapd::V1_0::IHostapdVendor;
+using vendor::qti::hardware::wifi::hostapd::V1_0::implementation::HostapdVendor;
+
+static android::sp<IHostapdVendor> vendor_service;
+#endif /* CONFIG_USE_VENDOR_HIDL */
 
 void hostapd_hidl_sock_handler(
     int /* sock */, void * /* eloop_ctx */, void * /* sock_ctx */)
@@ -64,6 +74,15 @@ int hostapd_hidl_init(struct hapd_interfaces *interfaces)
 		if (service->registerAsService() != android::NO_ERROR)
 			goto err;
 	}
+
+#ifdef CONFIG_USE_VENDOR_HIDL
+	vendor_service = new HostapdVendor(interfaces);
+	if (!vendor_service)
+		goto err;
+	if (vendor_service->registerAsService() != android::NO_ERROR)
+		goto err;
+#endif /* CONFIG_USE_VENDOR_HIDL */
+
 	return 0;
 err:
 	hostapd_hidl_deinit(interfaces);
@@ -79,4 +98,7 @@ void hostapd_hidl_deinit(struct hapd_interfaces *interfaces)
 	service.clear();
 	os_free(interfaces->hidl_service_name);
 	interfaces->hidl_service_name = NULL;
+#ifdef CONFIG_USE_VENDOR_HIDL
+	vendor_service.clear();
+#endif /* CONFIG_USE_VENDOR_HIDL */
 }
