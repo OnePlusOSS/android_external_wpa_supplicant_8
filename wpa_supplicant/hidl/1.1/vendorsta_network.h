@@ -97,6 +97,25 @@ public:
 	Return<void> setVendorProto(
 	    uint32_t proto_mask, setVendorProto_cb _hidl_cb) override;
 	Return<void> getVendorProto(getVendorProto_cb _hidl_cb) override;
+	Return<void> setDppConnector(
+	    const hidl_string& connector,
+	    setDppConnector_cb _hidl_cb) override;
+	Return<void> setDppNetAccessKey(
+	    const hidl_vec<uint8_t>& net_access_key,
+	    setDppNetAccessKey_cb _hidl_cb) override;
+	Return<void> setDppNetAccessKeyExpiry(
+	    uint32_t expiry, setDppNetAccessKeyExpiry_cb _hidl_cb) override;
+	Return<void> setDppCsign(
+	    const hidl_vec<uint8_t>& csign,
+	    setDppCsign_cb _hidl_cb) override;
+	Return<void> setVendorSimNumber(
+	    uint32_t id, setVendorSimNumber_cb _hidl_cb) override;
+	Return<void> setGroupMgmtCipher(
+	    uint32_t group_mgmt_cipher, setGroupMgmtCipher_cb _hidl_cb) override;
+	Return<void> setEapPhase1Params(
+	    const hidl_string& phase1, setEapPhase1Params_cb _hidl_cb) override;
+	Return<void> setEapOpensslCiphers(
+	    const hidl_string& openssl_ciphers, setEapOpensslCiphers_cb _hidl_cb) override;
 
 private:
 	// Corresponding worker functions for the HIDL methods.
@@ -111,7 +130,17 @@ private:
 	SupplicantStatus setEapErpInternal(bool enable);
         SupplicantStatus setProtoInternal(uint32_t proto_mask);
         std::pair<SupplicantStatus, uint32_t> getProtoInternal();
+        SupplicantStatus setDppConnectorInternal(const std::string& connector);
+	SupplicantStatus setDppNetAccessKeyInternal(
+	    const std::vector<uint8_t>& net_access_key);
+	SupplicantStatus setDppNetAccessKeyExpiryInternal(uint32_t expiry);
+	SupplicantStatus setDppCsignInternal(
+	    const std::vector<uint8_t>& csign);
 
+        SupplicantStatus setGroupMgmtCipherInternal(uint32_t grp_mgmt_cipher);
+        SupplicantStatus setEapPhase1ParamsInternal(const std::string& phase1);
+        SupplicantStatus setEapOpensslCiphersInternal(const std::string& openssl_ciphers);
+	SupplicantStatus setVendorSimNumberInternal(uint32_t id);
 	struct wpa_ssid* retrieveNetworkPtr();
 	struct wpa_supplicant* retrieveIfacePtr();
 	void resetInternalStateAfterParamsUpdate();

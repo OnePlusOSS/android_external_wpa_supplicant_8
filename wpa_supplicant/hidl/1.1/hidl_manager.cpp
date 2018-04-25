@@ -1514,6 +1514,165 @@ void HidlManager::notifyEapError(struct wpa_supplicant *wpa_s, int error_code)
 		static_cast<EapErrorCode>(error_code)));
 }
 
+#ifdef SUPPLICANT_VENDOR_HIDL
+/* Implement Vendor Iface for DPP callbacks */
+
+void HidlManager::notifyDppAuthSuccess(
+    struct wpa_supplicant *wpa_s, int initiator)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppAuthSuccess,
+		       std::placeholders::_1, initiator ? true : false));
+	}
+}
+
+void HidlManager::notifyDppNotCompatible(
+    struct wpa_supplicant *wpa_s, u8 capab, int initiator)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppNotCompatible,
+		       std::placeholders::_1, capab, initiator ? true : false));
+	}
+}
+
+void HidlManager::notifyDppResponsePending(struct wpa_supplicant *wpa_s)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppResponsePending,
+		       std::placeholders::_1));
+	}
+}
+
+void HidlManager::notifyDppScanPeerQrCode(
+    struct wpa_supplicant *wpa_s, const u8* i_bootstrap,
+    uint16_t i_bootstrap_len)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	std::vector<uint8_t> hidl_bootstrap_data;
+
+	if (i_bootstrap_len)
+		hidl_bootstrap_data.assign(i_bootstrap,
+					  i_bootstrap + i_bootstrap_len);
+
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppScanPeerQrCode,
+		       std::placeholders::_1, hidl_bootstrap_data));
+	}
+}
+
+void HidlManager::notifyDppConf(
+    struct wpa_supplicant *wpa_s, u8 type, u8* ssid, u8 ssid_len,
+    const char *connector, struct wpabuf *c_sign, struct wpabuf *net_access,
+    uint32_t net_access_expiry, const char *passphrase, uint32_t psk_set, u8 *psk)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	std::vector<uint8_t> hidl_ssid;
+	std::vector<uint8_t> hidl_c_sign;
+	std::vector<uint8_t> hidl_net_access;
+	std::vector<uint8_t> hidl_psk;
+	if (type == 2 /* RECEIVE */) {
+		if (ssid_len)
+			hidl_ssid.assign(ssid, ssid + ssid_len);
+
+		if (c_sign)
+		    hidl_c_sign = misc_utils::convertWpaBufToVector(c_sign);
+
+		if (net_access)
+		    hidl_net_access = misc_utils::convertWpaBufToVector(net_access);
+
+		if (psk_set)
+			hidl_psk.assign(psk, psk + PMK_LEN);
+	}
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppConf,
+		       std::placeholders::_1, type, hidl_ssid, connector,
+		       hidl_c_sign, hidl_net_access, net_access_expiry,
+		       passphrase, hidl_psk));
+	}
+}
+
+void HidlManager::notifyDppMissingAuth(
+    struct wpa_supplicant *wpa_s, u8 dpp_auth_param)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppMissingAuth,
+		       std::placeholders::_1, dpp_auth_param));
+	}
+}
+
+void HidlManager::notifyDppNetworkId(
+    struct wpa_supplicant *wpa_s, uint32_t net_id)
+{
+	if (!wpa_s)
+		return;
+
+	if (vendor_sta_iface_object_map_.find(wpa_s->ifname) ==
+	    vendor_sta_iface_object_map_.end())
+		return;
+
+	if (checkForVendorStaIfaceCallback(wpa_s->ifname) == true) {
+		callWithEachVendorStaIfaceCallback(
+		    wpa_s->ifname, std::bind(
+		       &ISupplicantVendorStaIfaceCallback::onDppNetworkId,
+		       std::placeholders::_1, net_id));
+	}
+}
+#endif //endif SUPPLICANT_VENDOR_HIDL
+
 /**
  * Retrieve the |ISupplicantP2pIface| hidl object reference using the provided
  * ifname.

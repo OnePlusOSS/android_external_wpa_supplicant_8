@@ -107,6 +107,32 @@ public:
                 getCapabilities_cb _hidl_cb) override;
 	Return<void> getVendorNetwork(
 	    SupplicantNetworkId id, getVendorNetwork_cb _hidl_cb) override;
+	/* DPP APIs */
+	Return<void> dppAddBootstrapQrcode(
+	    const hidl_string& uri, dppAddBootstrapQrcode_cb _hidl_cb) override;
+	Return<void> dppBootstrapGenerate(
+	    uint32_t type, const hidl_string& chan_list,
+	    const hidl_array<uint8_t, 6>& mac_addr,
+	    const hidl_string& info, const hidl_string& curve, const hidl_string& key,
+	    dppBootstrapGenerate_cb _hidl_cb) override;
+	Return<void> dppGetUri(uint32_t id, dppGetUri_cb _hidl_cb) override;
+	Return<void> dppBootstrapRemove(
+	    uint32_t id, dppBootstrapRemove_cb _hidl_cb) override;
+	Return<void> dppStartListen(
+	    const hidl_string& frequency, uint32_t dpp_role,
+	    bool qr_mutual, bool netrole_ap,
+	    dppStartListen_cb _hidl_cb) override;
+	Return<void> dppStopListen(dppStopListen_cb _hidl_cb) override;
+	Return<void> dppConfiguratorAdd(
+	    const hidl_string& curve, const hidl_string& key, uint32_t expiry,
+	    dppConfiguratorAdd_cb _hidl_cb) override;
+	Return<void> dppConfiguratorRemove(
+	    uint32_t id, dppConfiguratorRemove_cb _hidl_cb) override;
+	Return<void> dppStartAuth(
+	    int32_t peer_bootstrap_id, int32_t own_bootstrap_id, int32_t dpp_role,
+	    const hidl_string& ssid, const hidl_string& password, bool isAp,
+	    bool isDpp, int32_t conf_id, int32_t expiry, dppStartAuth_cb _hidl_cb) override;
+	Return<void> dppConfiguratorGetKey(uint32_t id, dppConfiguratorGetKey_cb _hidl_cb) override;
 
 private:
 	// Corresponding worker functions for the HIDL methods.
@@ -121,6 +147,28 @@ private:
 	std::pair<SupplicantStatus, android::sp<ISupplicantVendorNetwork>> getNetworkInternal(
 	    SupplicantNetworkId id);
 	struct wpa_supplicant* retrieveIfacePtr();
+	/* DPP Internal APIs */
+	std::pair<SupplicantStatus, int32_t> dppAddBootstrapQrcodeInternal(
+	    const std::string &uri);
+	std::pair<SupplicantStatus, int32_t> dppBootstrapGenerateInternal(
+	    uint32_t type, const std::string &chan_list,
+	    const std::array<uint8_t, 6>& bssid,
+	    const std::string &info, const std::string &curve, const std::string &key);
+	std::pair<SupplicantStatus, std::string> dppGetUriInternal(uint32_t id);
+	std::pair<SupplicantStatus, int32_t> dppBootstrapRemoveInternal(
+	    uint32_t id);
+	std::pair<SupplicantStatus, int32_t> dppListenInternal(
+	    const std::string &frequency, uint32_t dpp_role, bool qr_mutual, bool netrole_ap);
+	SupplicantStatus dppStopListenInternal();
+	std::pair<SupplicantStatus, int32_t> dppConfiguratorAddInternal(
+	    const std::string &curve, const std::string &key, uint32_t expiry);
+	std::pair<SupplicantStatus, int32_t> dppConfiguratorRemoveInternal(
+	    uint32_t id);
+	std::pair<SupplicantStatus, int32_t> dppStartAuthInternal(
+	    int32_t peer_bootstrap_id, int32_t own_bootstrap_id, int32_t dpp_role,
+	    const std::string &ssid, const std::string &password, bool isAp,
+	    bool isDpp, int32_t conf_id, int32_t expiry);
+	std::pair<SupplicantStatus, std::string> dppConfiguratorGetKeyInternal(uint32_t id);
 	// Reference to the global wpa_struct. This is assumed to be valid for
 	// the lifetime of the process.
 	struct wpa_global* wpa_global_;
