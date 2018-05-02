@@ -23,7 +23,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <cutils/sockets.h>
-#include "private/android_filesystem_config.h"
+#include <grp.h>
+#include <pwd.h>
 #endif /* ANDROID */
 
 #ifdef CONFIG_CTRL_IFACE_UDP_IPV6
@@ -153,8 +154,8 @@ try_again:
 #ifdef ANDROID
 	chmod(ctrl->local.sun_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 	/* Set group even if we do not have privileges to change owner */
-	chown(ctrl->local.sun_path, -1, AID_WIFI);
-	chown(ctrl->local.sun_path, AID_SYSTEM, AID_WIFI);
+	chown(ctrl->local.sun_path, -1, getgrnam("wifi")->gr_gid);
+	chown(ctrl->local.sun_path, getpwnam("system")->pw_uid, getgrnam("wifi")->gr_gid);
 
 	if (os_strncmp(ctrl_path, "@android:", 9) == 0) {
 		if (socket_local_client_connect(
