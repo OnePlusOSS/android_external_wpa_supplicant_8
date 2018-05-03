@@ -15,6 +15,8 @@ INCLUDES += $(TARGET_OUT_HEADERS)/qmi/inc
 INCLUDES += $(TARGET_OUT_HEADERS)/qmi/platform
 INCLUDES += $(TARGET_OUT_HEADERS)/qmi/core/lib/inc
 
+LIB_HEADER_EAP_PROXY := libril-qc-qmi-services-headers
+
 ifdef CONFIG_EAP_PROXY_MDM_DETECT
 L_CFLAGS += -DCONFIG_EAP_PROXY_MDM_DETECT
 INCLUDES += $(TARGET_OUT_HEADERS)/libmdmdetect/inc
