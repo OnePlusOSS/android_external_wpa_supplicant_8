@@ -626,12 +626,17 @@ CONFIG_EAP_SIM_COMMON=y
 NEED_AES_CBC=y
 endif
 
+ifndef DISABLE_EAP_PROXY
+ifneq ($(wildcard vendor/qcom/proprietary/mdm-helper/libmdmdetect),)
+CONFIG_EAP_PROXY_MDM_DETECT := true
+endif
 ifdef CONFIG_EAP_PROXY
 L_CFLAGS += -DCONFIG_EAP_PROXY
 OBJS += src/eap_peer/eap_proxy_$(CONFIG_EAP_PROXY).c
 include $(LOCAL_PATH)/eap_proxy_$(CONFIG_EAP_PROXY).mk
 CONFIG_IEEE8021X_EAPOL=y
-endif
+endif # CONFIG_EAP_PROXY
+endif # DISABLE_EAP_PROXY
 
 ifdef CONFIG_EAP_AKA_PRIME
 # EAP-AKA'

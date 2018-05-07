@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------
-Copyright (c) 2013, The Linux Foundation. All rights reserved.
+Copyright (c) 2013-2017, The Linux Foundation. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -116,6 +116,7 @@ static void handle_qmi_eap_ind(qmi_client_type user_handle,
                 void* ind_cb_data);
 
 static u8 *eap_proxy_getKey(struct eap_proxy_sm *eap_proxy);
+static u8 * eap_proxy_get_keys(struct eap_proxy_sm *sm);
 static enum eap_proxy_status eap_proxy_qmi_response_wait(struct eap_proxy_sm *eap_proxy);
 static int eap_proxy_is_state_changed(struct eap_proxy_sm *sm);
 static enum eap_proxy_status eap_proxy_process(struct eap_proxy_sm  *eap_proxy,
@@ -221,7 +222,7 @@ static void wpa_qmi_client_indication_cb
 
 			card_info_len = status_change_ind_ptr->card_status.card_info_len;
 			for (i = 0; i < card_info_len; i++) {
-				if(UIM_CARD_STATE_PRESENT_V01 !=
+				if(UIM_CARD_STATE_ABSENT_V01 ==
 				    status_change_ind_ptr->card_status.card_info[i].card_state) {
 					wpa_printf(MSG_DEBUG, "eap_proxy: %s SIM card removed. flush pmksa entries.", __func__);
 					eap_proxy->eapol_cb->eap_proxy_notify_sim_status(eap_proxy->ctx, SIM_STATE_ERROR);
@@ -680,13 +681,12 @@ void wpa_qmi_handle_ssr(qmi_client_type user_handle, qmi_client_error_type error
         wpa_printf(MSG_DEBUG, "eap_proxy: %s ", __func__);
 
         wpa_qmi_ssr = TRUE;
-        eloop_register_timeout(0, 0, wpa_qmi_register_notification, eap_proxy, NULL);
-}
-
-
-static void exit_proxy_init(int signum)
-{
-       pthread_exit(NULL);
+        if (eap_proxy->qmi_ssr_in_progress) {
+                wpa_printf(MSG_DEBUG, "eap_proxy: qmi_ssr_in_progress for eap_proxy=%p Skip another.", eap_proxy);
+        } else {
+                eap_proxy->qmi_ssr_in_progress = TRUE;
+                eloop_register_timeout(0, 0, wpa_qmi_register_notification, eap_proxy, NULL);
+        }
 }
 
 static void eap_proxy_post_init(struct eap_proxy_sm *eap_proxy)
@@ -696,7 +696,6 @@ static void eap_proxy_post_init(struct eap_proxy_sm *eap_proxy)
         qmi_idl_service_object_type qmi_client_service_obj[MAX_NO_OF_SIM_SUPPORTED];
         int index;
         static Boolean flag = FALSE;
-        struct sigaction    actions;
         int ret = 0;
         wpa_uim_struct_type *wpa_uim = eap_proxy->wpa_uim;
 #ifdef CONFIG_EAP_PROXY_MDM_DETECT
@@ -724,16 +723,12 @@ static void eap_proxy_post_init(struct eap_proxy_sm *eap_proxy)
                 return;
         }
 #endif /* CONFIG_EAP_PROXY_MDM_DETECT */
-
-        sigemptyset(&actions.sa_mask);
-        actions.sa_flags = 0;
-        actions.sa_handler = exit_proxy_init;
-        ret = sigaction(SIGUSR1,&actions,NULL);
-        if(ret < 0)
-                wpa_printf(MSG_DEBUG, "sigaction\n");
         eap_proxy->proxy_state = EAP_PROXY_INITIALIZE;
         eap_proxy->qmi_state = QMI_STATE_IDLE;
         eap_proxy->key = NULL;
+        eap_proxy->emsk = NULL;
+        eap_proxy->session_id = NULL;
+        eap_proxy->session_id_len = 0;
         eap_proxy->iskey_valid = FALSE;
         eap_proxy->is_state_changed = FALSE;
         eap_proxy->isEap = FALSE;
@@ -827,6 +822,7 @@ static void eap_proxy_post_init(struct eap_proxy_sm *eap_proxy)
                 return;
         }
 
+        eap_proxy->qmi_ssr_in_progress = FALSE;
         eap_proxy->proxy_state = EAP_PROXY_IDLE;
         eap_proxy_eapol_sm_set_bool(eap_proxy, EAPOL_eapSuccess, FALSE);
         eap_proxy_eapol_sm_set_bool(eap_proxy, EAPOL_eapFail, FALSE);
@@ -878,12 +874,9 @@ int eap_auth_end_eap_session(qmi_client_type qmi_auth_svc_client_ptr)
 static void eap_proxy_schedule_thread(void *eloop_ctx, void *timeout_ctx)
 {
         struct eap_proxy_sm *eap_proxy = eloop_ctx;
-        pthread_attr_t attr;
         int ret = -1;
 
-        pthread_attr_init(&attr);
-        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-        ret = pthread_create(&eap_proxy->thread_id, &attr, eap_proxy_post_init, eap_proxy);
+        ret = pthread_create(&eap_proxy->thread_id, NULL, eap_proxy_post_init, eap_proxy);
         if(ret < 0)
                wpa_printf(MSG_ERROR, "eap_proxy: starting thread is failed %d\n", ret);
 }
@@ -902,7 +895,7 @@ eap_proxy_init(void *eapol_ctx, const struct eapol_callbacks *eapol_cb,
         if(wpa_qmi_ssr) {
                 eap_proxy = eapol_ctx;
         } else {
-                eap_proxy =  os_malloc(sizeof(struct eap_proxy_sm));
+                eap_proxy =  os_zalloc(sizeof(struct eap_proxy_sm));
                 if (NULL == eap_proxy) {
                         wpa_printf(MSG_ERROR, "Error memory alloc  for eap_proxy"
                                 "eap_proxy_init\n");
@@ -915,12 +908,6 @@ eap_proxy_init(void *eapol_ctx, const struct eapol_callbacks *eapol_cb,
         }
 
         eap_proxy->proxy_state = EAP_PROXY_DISABLED;
-        eap_proxy->qmi_state = QMI_STATE_IDLE;
-        eap_proxy->key = NULL;
-        eap_proxy->iskey_valid = FALSE;
-        eap_proxy->is_state_changed = FALSE;
-        eap_proxy->isEap = FALSE;
-        eap_proxy->eap_type = EAP_TYPE_NONE;
 
         /* delay the qmi client initialization after the eloop_run starts,
         * in order to avoid the case of daemonize enabled, which exits the
@@ -941,8 +928,11 @@ static void eap_proxy_qmi_deinit(struct eap_proxy_sm *eap_proxy)
 
         if (NULL == eap_proxy)
                 return;
-
-        pthread_kill(eap_proxy->thread_id, SIGUSR1);
+        /* Waiting for eap_proxy_post_init to exit normally.
+         * The eap_proxy_post_init may wait for QMI responese.
+         * Force killing the thread will cause problem in QMI lib.
+         */
+        pthread_join(eap_proxy->thread_id, NULL);
         eap_proxy->proxy_state = EAP_PROXY_DISABLED;
 
         for (index = 0; index < MAX_NO_OF_SIM_SUPPORTED; ++index) {
@@ -961,7 +951,6 @@ static void eap_proxy_qmi_deinit(struct eap_proxy_sm *eap_proxy)
                 } else {
                         wpa_printf (MSG_ERROR, "eap_proxy: session not started"
                                 " for client = %d\n", index+1);
-                        continue;
                 }
 
                 if ((TRUE == eap_proxy->qmi_uim_svc_client_initialized[index]))  {
@@ -975,13 +964,15 @@ static void eap_proxy_qmi_deinit(struct eap_proxy_sm *eap_proxy)
                         eap_proxy->qmi_uim_svc_client_initialized[index] = FALSE;
                 }
 
-                qmiRetCode = qmi_client_release(eap_proxy->qmi_auth_svc_client_ptr[index]);
-                if (QMI_NO_ERR != qmiRetCode) {
-                        wpa_printf (MSG_ERROR, "eap_proxy: Unable to Releas the connection"
-                                        " to auth service for client=%d; error_ret=%d\n;",
-                                        index+1, qmiRetCode);
-                }  else {
-                        wpa_printf(MSG_ERROR, "eap_proxy: Released QMI EAP service client\n");
+                if (NULL != eap_proxy->qmi_auth_svc_client_ptr[index]) {
+                        qmiRetCode = qmi_client_release(eap_proxy->qmi_auth_svc_client_ptr[index]);
+                        if (QMI_NO_ERR != qmiRetCode) {
+                                wpa_printf (MSG_ERROR, "eap_proxy: Unable to Releas the connection"
+                                                " to auth service for client=%d; error_ret=%d\n;",
+                                                index+1, qmiRetCode);
+                        }  else {
+                                wpa_printf(MSG_ERROR, "eap_proxy: Released QMI EAP service client\n");
+                        }
                 }
 
         }
@@ -989,6 +980,15 @@ static void eap_proxy_qmi_deinit(struct eap_proxy_sm *eap_proxy)
         if (NULL != eap_proxy->key) {
                 os_free(eap_proxy->key);
                 eap_proxy->key = NULL;
+        }
+        if (eap_proxy->emsk) {
+                os_free(eap_proxy->emsk);
+                eap_proxy->emsk = NULL;
+        }
+        if (eap_proxy->session_id) {
+                os_free(eap_proxy->session_id);
+                eap_proxy->session_id = NULL;
+                eap_proxy->session_id_len = 0;
         }
 
         eap_proxy->iskey_valid = FALSE;
@@ -1197,6 +1197,15 @@ static enum eap_proxy_status eap_proxy_process(struct eap_proxy_sm  *eap_proxy,
                                 os_free(eap_proxy->key);
                                 eap_proxy->key = NULL;
                         }
+                        if (eap_proxy->emsk) {
+                                os_free(eap_proxy->emsk);
+                                eap_proxy->emsk = NULL;
+                        }
+                        if (eap_proxy->session_id) {
+                                os_free(eap_proxy->session_id);
+                                eap_proxy->session_id = NULL;
+                                eap_proxy->session_id_len = 0;
+                        }
                         eap_proxy->iskey_valid = FALSE;
                         eap_proxy->is_state_changed = TRUE;
                 }
@@ -1280,7 +1289,7 @@ static enum eap_proxy_status eap_proxy_process(struct eap_proxy_sm  *eap_proxy,
                                                         EAPOL_eapNoResp, TRUE);
                                 return EAP_PROXY_FAILURE;
                         } else if( eap_proxy->proxy_state == EAP_PROXY_AUTH_SUCCESS ) {
-                                eap_proxy_getKey(eap_proxy);
+                                eap_proxy_get_keys(eap_proxy);
                                 eap_proxy_eapol_sm_set_bool(eap_proxy,
                                                  EAPOL_eapSuccess, TRUE);
         /*
@@ -1431,9 +1440,90 @@ static u8 *eap_proxy_getKey(struct eap_proxy_sm *eap_proxy)
 
         wpa_printf(MSG_ERROR, "eap_proxy: eap_proxy_getkey EAP KEYS ");
         dump_buff(eap_proxy->key, EAP_PROXY_KEYING_DATA_LEN);
+
         return eap_proxy->key;
 }
 
+static u8 * eap_proxy_get_keys(struct eap_proxy_sm *sm)
+{
+	int qmiRetCode;
+
+	auth_get_eap_auth_credentials_req_msg_v01 key_req_msg;
+	auth_get_eap_auth_credentials_resp_msg_v01 key_resp_msg;
+
+	os_memset(&key_req_msg, 0,
+		  sizeof(auth_get_eap_auth_credentials_req_msg_v01));
+	os_memset(&key_resp_msg, 0,
+		  sizeof(auth_get_eap_auth_credentials_resp_msg_v01));
+
+	key_req_msg.cred_request_mask = QMI_AUTH_MASK_EAP_CRED_MSK_V01 |
+					QMI_AUTH_MASK_EAP_CRED_EXT_MSK_V01 |
+					QMI_AUTH_MASK_EAP_CRED_SESSION_ID_V01;
+
+	qmiRetCode = qmi_client_send_msg_sync(
+			sm->qmi_auth_svc_client_ptr[sm->user_selected_sim],
+			QMI_AUTH_GET_EAP_AUTH_CREDENTIALS_REQ_V01,
+			&key_req_msg,
+			sizeof(auth_get_eap_auth_credentials_req_msg_v01),
+			&key_resp_msg,
+			sizeof(auth_get_eap_auth_credentials_resp_msg_v01),
+			WPA_UIM_QMI_DEFAULT_TIMEOUT);
+
+	/* see if the keys are acquired successfully */
+	if (QMI_NO_ERR != qmiRetCode ||
+	    key_resp_msg.resp.result != QMI_RESULT_SUCCESS_V01) {
+	        wpa_printf(MSG_ERROR,
+			   "QMI-ERROR Unable to get keys, err_code=%d qmiErr=%d "
+			   "Try using msg QMI_AUTH_GET_EAP_SESSION_KEYS_REQ_V01",
+			   qmiRetCode, key_resp_msg.resp.error);
+	        return eap_proxy_getKey(sm);
+	}
+
+	wpa_printf(MSG_DEBUG, "eap_proxy: qmi msk_valid:%d emsk_valid:%d session_id_valid:%d",
+		   key_resp_msg.msk_valid, key_resp_msg.ext_msk_valid,
+		   key_resp_msg.session_id_valid);
+
+	if (key_resp_msg.msk_valid && key_resp_msg.msk_len > 0 &&
+	    key_resp_msg.msk_len <= EAP_PROXY_KEYING_DATA_LEN) {
+		os_free(sm->key);
+		sm->key = os_zalloc(EAP_PROXY_KEYING_DATA_LEN);
+		if (sm->key != NULL) {
+			os_memcpy(sm->key, key_resp_msg.msk,
+				  key_resp_msg.msk_len);
+			sm->iskey_valid = TRUE;
+			sm->proxy_state = EAP_PROXY_AUTH_SUCCESS;
+			wpa_hexdump_key(MSG_DEBUG, "eap_proxy: session key",
+					sm->key, EAP_PROXY_KEYING_DATA_LEN);
+
+		}
+	}
+
+	if (key_resp_msg.ext_msk_valid && key_resp_msg.ext_msk_len > 0 &&
+	    key_resp_msg.ext_msk_len <= EAP_PROXY_KEYING_DATA_LEN) {
+		os_free(sm->emsk);
+		sm->emsk = os_zalloc(EAP_PROXY_KEYING_DATA_LEN);
+		if (sm->emsk != NULL) {
+			os_memcpy(sm->emsk, key_resp_msg.ext_msk,
+				  key_resp_msg.ext_msk_len);
+			wpa_hexdump_key(MSG_DEBUG, "eap_proxy: emsk", sm->emsk,
+					EAP_PROXY_KEYING_DATA_LEN);
+		}
+	}
+
+	if (key_resp_msg.session_id_valid) {
+		os_free(sm->session_id);
+		sm->session_id = os_zalloc(key_resp_msg.session_id_len);
+		if (sm->session_id != NULL) {
+			os_memcpy(sm->session_id, key_resp_msg.session_id,
+				  key_resp_msg.session_id_len);
+			sm->session_id_len = key_resp_msg.session_id_len;
+			wpa_hexdump_key(MSG_DEBUG, "eap_proxy: session_id",
+					sm->session_id, sm->session_id_len);
+		}
+	}
+
+	return sm->key;
+}
 
 /**
  * eap_key_available - Get key availability (eapKeyAvailable variable)
@@ -1481,6 +1571,68 @@ const u8 * eap_proxy_get_eapKeyData(struct eap_proxy_sm *sm, size_t *len)
         *len = EAP_PROXY_KEYING_DATA_LEN;
         return sm->key;
 }
+
+
+u8 * eap_proxy_get_eap_session_id(struct eap_proxy_sm *sm, size_t *len)
+{
+	u8 *id;
+
+	*len = 0;
+	if (sm == NULL || sm->session_id == NULL)
+		return NULL;
+
+	id = os_malloc(sm->session_id_len);
+	if (id == NULL)
+		return NULL;
+
+	os_memcpy(id, sm->session_id, sm->session_id_len);
+	*len = sm->session_id_len;
+	return id;
+}
+
+
+u8 * eap_proxy_get_emsk(struct eap_proxy_sm *sm, size_t *len)
+{
+	u8 *emsk;
+
+	*len = 0;
+	if (sm == NULL || sm->emsk == NULL)
+		return NULL;
+
+	emsk = os_malloc(EAP_PROXY_KEYING_DATA_LEN);
+	if (emsk == NULL)
+		return NULL;
+
+	os_memcpy(emsk, sm->emsk, EAP_PROXY_KEYING_DATA_LEN);
+	*len = EAP_PROXY_KEYING_DATA_LEN;
+	return emsk;
+}
+
+
+void eap_proxy_sm_abort(struct eap_proxy_sm *sm)
+{
+	if (sm == NULL)
+		return;
+
+	if (sm->key) {
+		os_free(sm->key);
+		sm->key = NULL;
+	}
+
+	if (sm->emsk) {
+		os_free(sm->emsk);
+		sm->emsk = NULL;
+	}
+
+	if (sm->session_id) {
+		os_free(sm->session_id);
+		sm->session_id = NULL;
+		sm->session_id_len = 0;
+	}
+
+	sm->iskey_valid = FALSE;
+}
+
 
 /**
  * eap_proxy_get_eapRespData - Get EAP response data
@@ -1613,39 +1765,18 @@ eap_proxy_packet_update(struct eap_proxy_sm *eap_proxy, u8 *eapReqData,
 }
 
 
-u8 * eap_proxy_get_eap_session_id(struct eap_proxy_sm *sm, size_t *len)
-{
-        wpa_printf(MSG_ERROR, "%s: enter: not implemented\n", __func__);
-        return NULL;
-}
-
-
-u8 * eap_proxy_get_emsk(struct eap_proxy_sm *sm, size_t *len)
-{
-        wpa_printf(MSG_ERROR, "%s: enter: not implemented\n", __func__);
-        return NULL;
-}
-
-
-void eap_proxy_sm_abort(struct eap_proxy_sm *sm)
-{
-        wpa_printf(MSG_ERROR, "%s: enter: not implemented\n", __func__);
-        return;
-}
-
-
 static void dump_buff(u8 *buff, int len)
 {
-        int i ;
+        wpa_printf(MSG_ERROR, "eap_proxy: ---- EAP Buffer----LEN %d",len);
 
-        wpa_printf(MSG_ERROR, "eap_proxy: ---- EAP Buffer----LEN %d\n",len);
-        for (i = 0; i < len; i++) {
-                if (0 == i%8)
-                        wpa_printf(MSG_DEBUG, " \n");
-                wpa_printf(MSG_ERROR, "eap_proxy: 0x%x  ", buff[i]);
+        while (len > 32) {
+                wpa_hexdump(MSG_DEBUG, "eap_proxy:", buff, 32);
+                buff += 32;
+                len -= 32;
         }
-        return;
+        wpa_hexdump(MSG_DEBUG, "eap_proxy: ", buff, len);
 }
+
 static char bin_to_hexchar(u8 ch)
 {
         if (ch < 0x0a) {
@@ -2200,46 +2331,62 @@ static const char *eap_proxy_sm_state_txt(int state)
 
 
 /**
- * eap_proxy_get_mcc_mnc - Get MCC/MNC
+ * eap_proxy_get_imsi - Get IMSI
+ * @config_sim_num: sim number for the configuration, -1 if not specified
  * @imsi_buf: Buffer for returning IMSI
  * @imsi_len: Buffer for returning IMSI length
  * Returns: MNC length (2 or 3) or -1 on error
  */
-int eap_proxy_get_imsi(struct eap_proxy_sm *eap_proxy, char *imsi_buf,
-                        size_t *imsi_len)
+int eap_proxy_get_imsi(struct eap_proxy_sm *eap_proxy, int config_sim_num,
+		       char *imsi_buf, size_t *imsi_len)
 {
 #ifdef SIM_AKA_IDENTITY_IMSI
-        int mnc_len;
-        int sim_num = eap_proxy->user_selected_sim;
+	int mnc_len;
+	int sim_num;
 
-        if ((eap_proxy->proxy_state == EAP_PROXY_DISABLED) ||
-            (eap_proxy->proxy_state == EAP_PROXY_INITIALIZE)) {
-                wpa_printf(MSG_ERROR, "eap_proxy:%s: Not initialized\n", __func__);
-                return FALSE;
-        }
-        if (!wpa_qmi_read_card_status(sim_num, eap_proxy->wpa_uim)) {
-        wpa_printf(MSG_INFO, "eap_proxy: Card not ready");
-                return -1;
-        }
+	if (config_sim_num > 0) {
+		sim_num = config_sim_num - 1;
+		if (sim_num >= MAX_NO_OF_SIM_SUPPORTED) {
+			wpa_printf(MSG_ERROR,
+				   "eap_proxy: Invalid user sim %d selected",
+				   config_sim_num);
+			return -1;
+		}
+	} else {
+		sim_num = eap_proxy->user_selected_sim;
+	}
 
-        if (!wpa_qmi_read_card_imsi(sim_num, eap_proxy->wpa_uim) || imsi == NULL) {
-                wpa_printf(MSG_INFO, "eap_proxy: Failed to read card IMSI");
-                return -1;
-        }
+	if ((eap_proxy->proxy_state == EAP_PROXY_DISABLED) ||
+	    (eap_proxy->proxy_state == EAP_PROXY_INITIALIZE)) {
+		wpa_printf(MSG_ERROR,
+			   "eap_proxy:%s: Not initialized", __func__);
+		return -1;
+	}
 
-        *imsi_len = os_strlen(imsi);
-        os_memcpy(imsi_buf, imsi, *imsi_len + 1);
+	if (!wpa_qmi_read_card_status(sim_num, eap_proxy->wpa_uim)) {
+		wpa_printf(MSG_INFO, "eap_proxy: Card not ready");
+		return -1;
+	}
 
-        mnc_len = card_mnc_len;
-        if (mnc_len < 2 || mnc_len > 3)
-                mnc_len = 3; /* Default to 3 if MNC length is unknown */
+	if (!wpa_qmi_read_card_imsi(sim_num, eap_proxy->wpa_uim) ||
+	    imsi == NULL) {
+		wpa_printf(MSG_INFO, "eap_proxy: Failed to read card IMSI");
+		return -1;
+	}
 
-        os_free(imsi);
-        imsi = NULL;
+	*imsi_len = os_strlen(imsi);
+	os_memcpy(imsi_buf, imsi, *imsi_len + 1);
 
-        return mnc_len;
+	mnc_len = card_mnc_len;
+	if (mnc_len < 2 || mnc_len > 3)
+		mnc_len = 3; /* Default to 3 if MNC length is unknown */
+
+	os_free(imsi);
+	imsi = NULL;
+
+	return mnc_len;
 #else /* SIM_AKA_IDENTITY_IMSI */
-        return -1;
+	return -1;
 #endif /* SIM_AKA_IDENTITY_IMSI */
 }
 

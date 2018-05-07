@@ -10,7 +10,8 @@
 #include <time.h>
 #include <sys/stat.h>
 #ifdef ANDROID
-#include "private/android_filesystem_config.h"
+#include <grp.h>
+#include <pwd.h>
 #endif /* ANDROID */
 
 #include "common.h"
@@ -117,7 +118,7 @@ static int android_update_permission(const char *path, mode_t mode)
 
 	/* Allow processes running with Group ID as AID_WIFI,
 	 * to read files from SP, SP/<fqdn>, Cert and osu-info directories */
-	if (chown(path, -1, AID_WIFI)) {
+	if (chown(path, -1, getgrnam("wifi")->gr_gid)) {
 		wpa_printf(MSG_INFO, "CTRL: Could not chown directory: %s",
 			   strerror(errno));
 		return -1;
