@@ -58,6 +58,9 @@ struct wpas_hidl_priv *wpas_hidl_init(struct wpa_global *global)
 	if (!hidl_manager)
 		goto err;
 	hidl_manager->registerHidlService(global);
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->registerVendorHidlService(global);
+#endif
 	// We may not need to store this hidl manager reference in the
 	// global data strucure because we've made it a singleton class.
 	priv->hidl_manager = (void *)hidl_manager;
