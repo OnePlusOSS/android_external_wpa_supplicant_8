@@ -116,6 +116,22 @@ public:
 	    const hidl_string& phase1, setEapPhase1Params_cb _hidl_cb) override;
 	Return<void> setEapOpensslCiphers(
 	    const hidl_string& openssl_ciphers, setEapOpensslCiphers_cb _hidl_cb) override;
+	Return<void> setWapiPskType(
+	    uint32_t type, setWapiPskType_cb _hidl_cb) override;
+	Return<void> setWapiPsk(
+	    const hidl_string &psk, setWapiPsk_cb _hidl_cb) override;
+	Return<void> setWapiCertSelMode(
+	    uint32_t mode, setWapiCertSelMode_cb _hidl_cb) override;
+	Return<void> setWapiCertSel(
+	    const hidl_string &name, setWapiCertSel_cb _hidl_cb) override;
+	Return<void> getWapiPskType(
+	    getWapiPskType_cb _hidl_cb) override;
+	Return<void> getWapiPsk(
+	    getWapiPsk_cb _hidl_cb) override;
+	Return<void> getWapiCertSelMode(
+	    getWapiCertSelMode_cb _hidl_cb) override;
+	Return<void> getWapiCertSel(
+	    getWapiCertSel_cb _hidl_cb) override;
 
 private:
 	// Corresponding worker functions for the HIDL methods.
@@ -141,6 +157,15 @@ private:
         SupplicantStatus setEapPhase1ParamsInternal(const std::string& phase1);
         SupplicantStatus setEapOpensslCiphersInternal(const std::string& openssl_ciphers);
 	SupplicantStatus setVendorSimNumberInternal(uint32_t id);
+	SupplicantStatus setWapiPskTypeInternal(uint32_t type);
+	SupplicantStatus setWapiPskInternal(const std::string &psk);
+	SupplicantStatus setWapiCertSelModeInternal(uint32_t mode);
+	SupplicantStatus setWapiCertSelInternal(const std::string &name);
+	std::pair<SupplicantStatus, uint32_t> getWapiPskTypeInternal();
+	std::pair<SupplicantStatus, std::string> getWapiPskInternal();
+	std::pair<SupplicantStatus, uint32_t> getWapiCertSelModeInternal();
+	std::pair<SupplicantStatus, std::string> getWapiCertSelInternal();
+
 	struct wpa_ssid* retrieveNetworkPtr();
 	struct wpa_supplicant* retrieveIfacePtr();
 	void resetInternalStateAfterParamsUpdate();

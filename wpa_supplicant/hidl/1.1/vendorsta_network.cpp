@@ -248,6 +248,66 @@ Return<void> VendorStaNetwork::setVendorSimNumber(
 	    &VendorStaNetwork::setVendorSimNumberInternal, _hidl_cb, id);
 }
 
+Return<void> VendorStaNetwork::setWapiPskType(
+    uint32_t type, setWapiPskType_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setWapiPskTypeInternal, _hidl_cb, type);
+}
+
+Return<void> VendorStaNetwork::setWapiPsk(
+    const hidl_string &psk, setWapiPsk_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setWapiPskInternal, _hidl_cb, psk);
+}
+
+Return<void> VendorStaNetwork::setWapiCertSelMode(
+    uint32_t mode, setWapiCertSelMode_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setWapiCertSelModeInternal, _hidl_cb, mode);
+}
+
+Return<void> VendorStaNetwork::setWapiCertSel(
+    const hidl_string &name, setWapiCertSel_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setWapiCertSelInternal, _hidl_cb, name);
+}
+
+Return<void> VendorStaNetwork::getWapiPskType(getWapiPskType_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::getWapiPskTypeInternal, _hidl_cb);
+}
+
+Return<void> VendorStaNetwork::getWapiPsk(getWapiPsk_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::getWapiPskInternal, _hidl_cb);
+}
+
+Return<void> VendorStaNetwork::getWapiCertSelMode(getWapiCertSelMode_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::getWapiCertSelModeInternal, _hidl_cb);
+}
+
+Return<void> VendorStaNetwork::getWapiCertSel(getWapiCertSel_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::getWapiCertSelInternal, _hidl_cb);
+}
+
 SupplicantStatus VendorStaNetwork::setKeyMgmtInternal(uint32_t key_mgmt_mask)
 {
 	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
@@ -454,6 +514,119 @@ SupplicantStatus VendorStaNetwork::setVendorSimNumberInternal(uint32_t id)
 	wpa_ssid->eap.sim_num = id;
 	resetInternalStateAfterParamsUpdate();
 	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus VendorStaNetwork::setWapiPskTypeInternal(uint32_t type)
+{
+
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+
+	wpa_ssid->psk_key_type = type;
+	wpa_printf(MSG_DEBUG, "WapiPskType: 0x%x", wpa_ssid->psk_key_type);
+	resetInternalStateAfterParamsUpdate();
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_WAPI */
+        return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+#endif /* CONFIG_WAPI */
+}
+
+SupplicantStatus VendorStaNetwork::setWapiPskInternal(const std::string &psk)
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+
+	if (wpa_ssid->wapi_psk &&
+	    os_strlen(wpa_ssid->wapi_psk) == psk.size() &&
+	    os_memcmp(wpa_ssid->wapi_psk, psk.c_str(), psk.size()) == 0) {
+		return {SupplicantStatusCode::SUCCESS, ""};
+	}
+
+	if (setVendorStringFieldAndResetState(
+		psk.c_str(), &(wpa_ssid->wapi_psk), "wapi_psk")) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_WAPI */
+        return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+#endif /* CONFIG_WAPI */
+}
+
+SupplicantStatus VendorStaNetwork::setWapiCertSelModeInternal(uint32_t mode)
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+
+	wpa_ssid->wapi_user_cert_mode = mode;
+	wpa_printf(MSG_DEBUG, "WapiCertSelMode: 0x%x", wpa_ssid->wapi_user_cert_mode);
+	resetInternalStateAfterParamsUpdate();
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_WAPI */
+        return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+#endif /* CONFIG_WAPI */
+}
+
+SupplicantStatus VendorStaNetwork::setWapiCertSelInternal(const std::string &name)
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+
+	if (setVendorStringFieldAndResetState(
+		name.c_str(), &(wpa_ssid->wapi_user_sel_cert), "wapi_user_sel_cert")) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_WAPI */
+        return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+#endif /* CONFIG_WAPI */
+}
+
+std::pair<SupplicantStatus, uint32_t> VendorStaNetwork::getWapiPskTypeInternal()
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	return {{SupplicantStatusCode::SUCCESS, ""}, wpa_ssid->psk_key_type};
+#else /* CONFIG_WAPI */
+	return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+#endif /* CONFIG_WAPI */
+}
+
+std::pair<SupplicantStatus, std::string> VendorStaNetwork::getWapiPskInternal()
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (!wpa_ssid->wapi_psk) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+	}
+	return {{SupplicantStatusCode::SUCCESS, ""}, wpa_ssid->wapi_psk};
+#else /* CONFIG_WAPI */
+	return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+#endif /* CONFIG_WAPI */
+}
+
+std::pair<SupplicantStatus, uint32_t> VendorStaNetwork::getWapiCertSelModeInternal()
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	return {{SupplicantStatusCode::SUCCESS, ""}, wpa_ssid->wapi_user_cert_mode};
+#else /* CONFIG_WAPI */
+	return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+#endif /* CONFIG_WAPI */
+}
+
+std::pair<SupplicantStatus, std::string> VendorStaNetwork::getWapiCertSelInternal()
+{
+#ifdef CONFIG_WAPI
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (!wpa_ssid->wapi_user_sel_cert) {
+		return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+	}
+	return {{SupplicantStatusCode::SUCCESS, ""}, wpa_ssid->wapi_user_sel_cert};
+#else /* CONFIG_WAPI */
+	return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, {}};
+#endif /* CONFIG_WAPI */
 }
 
 /**
