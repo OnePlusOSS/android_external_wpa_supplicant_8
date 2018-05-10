@@ -44,6 +44,7 @@ extern "C" {
 #include "interworking.h"
 #include "hs20_supplicant.h"
 #include "wps_supplicant.h"
+#include "dpp_supplicant.h"
 }
 
 namespace vendor {
@@ -107,6 +108,93 @@ Return<void> VendorStaIface::getVendorNetwork(
 	    &VendorStaIface::getNetworkInternal, _hidl_cb, id);
 }
 
+Return<void> VendorStaIface::dppAddBootstrapQrcode(
+    const hidl_string& uri, dppAddBootstrapQrcode_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppAddBootstrapQrcodeInternal, _hidl_cb, uri);
+}
+
+Return<void> VendorStaIface::dppBootstrapGenerate(
+    uint32_t type, const hidl_string& chan_list, const hidl_array<uint8_t, 6> &mac_addr,
+    const hidl_string& info, const hidl_string& curve, const hidl_string& key,
+    dppBootstrapGenerate_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppBootstrapGenerateInternal, _hidl_cb, type,
+	    chan_list, mac_addr, info, curve, key);
+}
+
+Return<void> VendorStaIface::dppGetUri(uint32_t id, dppGetUri_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppGetUriInternal, _hidl_cb, id);
+}
+
+Return<void> VendorStaIface::dppBootstrapRemove(
+    uint32_t id, dppBootstrapRemove_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppBootstrapRemoveInternal, _hidl_cb, id);
+}
+
+Return<void> VendorStaIface::dppStartListen(
+    const hidl_string& frequency, uint32_t dpp_role, bool qr_mutual,
+    bool netrole_ap, dppStartListen_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppListenInternal, _hidl_cb, frequency, dpp_role,
+	    qr_mutual, netrole_ap);
+}
+
+Return<void> VendorStaIface::dppStopListen(dppStopListen_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppStopListenInternal, _hidl_cb);
+}
+
+Return<void> VendorStaIface::dppConfiguratorAdd(
+    const hidl_string& curve, const hidl_string& key, uint32_t expiry,
+    dppConfiguratorAdd_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppConfiguratorAddInternal, _hidl_cb, curve,
+	    key, expiry);
+}
+
+Return<void> VendorStaIface::dppConfiguratorRemove(
+    uint32_t id, dppConfiguratorRemove_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppConfiguratorRemoveInternal, _hidl_cb, id);
+}
+
+Return<void> VendorStaIface::dppStartAuth(
+    int32_t peer_bootstrap_id, int32_t own_bootstrap_id, int32_t dpp_role,
+    const hidl_string& ssid, const hidl_string& password, bool isAp,
+    bool isDpp, int32_t conf_id, int32_t expiry, dppStartAuth_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppStartAuthInternal, _hidl_cb, peer_bootstrap_id,
+	    own_bootstrap_id, dpp_role, ssid, password, isAp, isDpp,
+	    conf_id, expiry);
+}
+
+Return<void> VendorStaIface::dppConfiguratorGetKey(uint32_t id, dppConfiguratorGetKey_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_IFACE_INVALID,
+	    &VendorStaIface::dppConfiguratorGetKeyInternal, _hidl_cb, id);
+}
 SupplicantStatus VendorStaIface::registerCallbackInternal(
     const android::sp<ISupplicantVendorStaIfaceCallback> &callback)
 {
@@ -200,6 +288,210 @@ VendorStaIface::getCapabilitiesInternal(const std::string &capa_type)
 
 }
 
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppAddBootstrapQrcodeInternal(const std::string &uri)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	int ret = wpas_dpp_qr_code(wpa_s, uri.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppBootstrapGenerateInternal(
+	    uint32_t type, const std::string &chan_list,
+	    const std::array<uint8_t, 6> &mac_addr,
+	    const std::string &info, const std::string &curve, const std::string &key)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	std::string cmd = "";
+	int ret;
+	char addr[20];
+
+	if (type == 0 /* QR Code */)
+		cmd += "type=qrcode";
+	else if (type == 1 /* NAN/pkex */)
+		cmd += "type=pkex";
+
+	cmd += (chan_list.empty()) ? "" : " chan="+chan_list;
+	cmd += (info.empty()) ? "" : " info="+info;
+	cmd += (curve.empty()) ? "" : " curve="+curve;
+	cmd += (key.empty()) ? "" : " key="+key;
+
+	os_snprintf(addr, 20, MACSTR, MAC2STR(mac_addr.data()));
+	std::string mac_str(addr);
+	cmd += (is_zero_ether_addr(mac_addr.data())) ? "" : " mac="+mac_str;
+
+	ret = wpas_dpp_bootstrap_gen(wpa_s, cmd.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, std::string> VendorStaIface::dppGetUriInternal(uint32_t id)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	const char* uri_data = wpas_dpp_bootstrap_get_uri(wpa_s, id);
+	if (!uri_data)
+		return {SupplicantStatus{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+
+	std::string uri(uri_data);
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, uri};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppBootstrapRemoveInternal(uint32_t id)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	std::string val;
+	int ret;
+
+	if (id == 0)
+		val = "*";
+	else
+		val = std::to_string(id);
+
+	ret = wpas_dpp_bootstrap_remove(wpa_s, val.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppListenInternal(
+	     const std::string &frequency, uint32_t dpp_role,
+	     bool qr_mutual, bool netrole_ap)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	std::string cmd = "";
+	int ret;
+
+	cmd += (frequency.empty()) ? "" : " " +frequency;
+	cmd += (dpp_role) ? " role=enrollee" : " role=configurator";
+	cmd += (qr_mutual) ? " qr=mutual" : "";
+	cmd += (netrole_ap) ? " netrole=ap" : "";
+
+	ret = wpas_dpp_listen(wpa_s, cmd.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+SupplicantStatus VendorStaIface::dppStopListenInternal()
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+
+	wpas_dpp_listen_stop(wpa_s);
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_DPP */
+        return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppConfiguratorAddInternal(
+    const std::string &curve, const std::string &key, uint32_t expiry)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	std::string cmd = "";
+	int ret;
+
+	cmd += (curve.empty()) ? "" : " curve="+curve;
+	cmd += (key.empty()) ? "" : " key="+key;
+	cmd += (!expiry) ? "" : " expiry="+std::to_string(expiry);
+
+	ret = wpas_dpp_configurator_add(wpa_s, cmd.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppConfiguratorRemoveInternal(uint32_t id)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	std::string val;
+	int ret;
+
+	if (id == 0)
+		val = "*";
+	else
+		val = std::to_string(id);
+
+	ret = wpas_dpp_configurator_remove(wpa_s, val.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, int32_t> VendorStaIface::dppStartAuthInternal(
+	    int32_t peer_bootstrap_id, int32_t own_bootstrap_id, int32_t dpp_role,
+	    const std::string &ssid, const std::string &password, bool isAp,
+	    bool isDpp, int32_t conf_id, int32_t expiry)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+	std::string cmd = "";
+	int ret;
+
+	cmd += " peer="+std::to_string(peer_bootstrap_id);
+	cmd += (own_bootstrap_id > 0) ? " own="+std::to_string(own_bootstrap_id) : "";
+	cmd += (dpp_role) ? " role=enrollee" : " role=configurator";
+	cmd += (ssid.empty()) ? "" : " ssid="+ssid;
+	cmd += (password.empty()) ? "" : " pass="+password;
+
+	if (isAp)
+		cmd += (isDpp) ? " conf=ap-dpp" : " conf=ap-psk";
+	else
+		cmd += (isDpp) ? " conf=sta-dpp" : " conf=sta-psk";
+
+	cmd += (conf_id) ? " configurator="+std::to_string(conf_id) : "";
+	cmd += (expiry) ? " expiry="+std::to_string(expiry) : "";
+
+	ret = wpas_dpp_auth_init(wpa_s, cmd.c_str());
+
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, ret};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+std::pair<SupplicantStatus, std::string> VendorStaIface::dppConfiguratorGetKeyInternal(uint32_t id)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = retrieveIfacePtr();
+#define CONFIGURATOR_KEY_LEN 2048
+	char key_buf[CONFIGURATOR_KEY_LEN];
+	int ret = wpas_dpp_configurator_get_key(wpa_s, id, key_buf, CONFIGURATOR_KEY_LEN);
+	if (ret < 0)
+		return {SupplicantStatus{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+
+	std::string key(key_buf);
+#undef CONFIGURATOR_KEY_LEN
+	return {SupplicantStatus{SupplicantStatusCode::SUCCESS, ""}, key};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
 /**
  * Retrieve the underlying |wpa_supplicant| struct
  * pointer for this iface.

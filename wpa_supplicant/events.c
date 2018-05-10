@@ -586,7 +586,7 @@ static int wpa_supplicant_ssid_bss_match(struct wpa_supplicant *wpa_s,
 		if (!(ie.key_mgmt & ssid->key_mgmt)) {
 			if (debug_print)
 				wpa_dbg(wpa_s, MSG_DEBUG,
-					"   skip RSN IE - key mgmt mismatch");
+					"   skip RSN IE - key mgmt mismatch ie.key_mgmt %d  ssid->key_mgmt %d",ie.key_mgmt,ssid->key_mgmt);
 			break;
 		}
 

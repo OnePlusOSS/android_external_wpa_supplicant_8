@@ -54,6 +54,7 @@ constexpr uint32_t kAllowedVendorKeyMgmtMask =
      static_cast<uint32_t>(ISupplicantVendorStaNetwork::VendorKeyMgmtMask::FILS_SHA256) |
      static_cast<uint32_t>(ISupplicantVendorStaNetwork::VendorKeyMgmtMask::FILS_SHA384) |
      static_cast<uint32_t>(ISupplicantVendorStaNetwork::VendorKeyMgmtMask::OWE) |
+     static_cast<uint32_t>(ISupplicantVendorStaNetwork::VendorKeyMgmtMask::SAE) |
      static_cast<uint32_t>(ISupplicantVendorStaNetwork::VendorKeyMgmtMask::DPP));
 
 constexpr uint32_t kAllowedVendorAuthAlgMask =
@@ -84,6 +85,7 @@ namespace supplicantvendor {
 namespace V2_0 {
 namespace Implementation {
 using android::hardware::wifi::supplicant::V1_1::implementation::hidl_return_util::validateAndCall;
+//using android::hardware::wifi::supplicant::V1_1::implementation;
 
 VendorStaNetwork::VendorStaNetwork(
     struct wpa_global *wpa_global, const char ifname[], int network_id)
@@ -181,6 +183,69 @@ Return<void> VendorStaNetwork::getVendorProto(getVendorProto_cb _hidl_cb)
 	return validateAndCall(
 	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
 	    &VendorStaNetwork::getProtoInternal, _hidl_cb);
+}
+
+Return<void> VendorStaNetwork::setGroupMgmtCipher(
+    uint32_t group_mgmt_cipher, setGroupMgmtCipher_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setGroupMgmtCipherInternal, _hidl_cb, group_mgmt_cipher);
+}
+
+Return<void> VendorStaNetwork::setEapPhase1Params(
+    const hidl_string &phase1, setEapPhase1Params_cb _hidl_cb)
+{
+        return validateAndCall(
+            this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+            &VendorStaNetwork::setEapPhase1ParamsInternal, _hidl_cb, phase1);
+}
+
+Return<void> VendorStaNetwork::setEapOpensslCiphers(
+    const hidl_string &openssl_ciphers, setEapOpensslCiphers_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setEapOpensslCiphersInternal, _hidl_cb, openssl_ciphers);
+}
+Return<void> VendorStaNetwork::setDppConnector(
+    const hidl_string &connector, setDppConnector_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setDppConnectorInternal, _hidl_cb, connector);
+}
+
+Return<void> VendorStaNetwork::setDppNetAccessKey(
+    const hidl_vec<uint8_t>& net_access_key, setDppNetAccessKey_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setDppNetAccessKeyInternal, _hidl_cb, net_access_key);
+}
+
+Return<void> VendorStaNetwork::setDppNetAccessKeyExpiry(
+    uint32_t expiry, setDppNetAccessKeyExpiry_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setDppNetAccessKeyExpiryInternal, _hidl_cb, expiry);
+}
+
+Return<void> VendorStaNetwork::setDppCsign(
+    const hidl_vec<uint8_t>& csign, setDppCsign_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setDppCsignInternal, _hidl_cb, csign);
+}
+
+Return<void> VendorStaNetwork::setVendorSimNumber(
+    uint32_t id, setVendorSimNumber_cb _hidl_cb)
+{
+	return validateAndCall(
+	    this, SupplicantStatusCode::FAILURE_NETWORK_INVALID,
+	    &VendorStaNetwork::setVendorSimNumberInternal, _hidl_cb, id);
 }
 
 SupplicantStatus VendorStaNetwork::setKeyMgmtInternal(uint32_t key_mgmt_mask)
@@ -289,6 +354,108 @@ std::pair<SupplicantStatus, uint32_t> VendorStaNetwork::getProtoInternal()
 		wpa_ssid->proto & kAllowedVendorProtoMask};
 }
 
+SupplicantStatus VendorStaNetwork::setDppConnectorInternal(
+    const std::string &connector)
+{
+#ifdef CONFIG_DPP
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (setVendorStringFieldAndResetState(
+		connector.c_str(), &(wpa_ssid->dpp_connector),
+		"dpp_connector")) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_DPP */
+        return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+#endif /* CONFIG_DPP */
+}
+
+SupplicantStatus VendorStaNetwork::setDppNetAccessKeyInternal(
+    const std::vector<uint8_t> &net_access_key)
+{
+#ifdef CONFIG_DPP
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (setHexStr2bin(net_access_key.data(), net_access_key.size(),
+			  &(wpa_ssid->dpp_netaccesskey),
+			  &(wpa_ssid->dpp_netaccesskey_len), "dpp NetAccessKey")) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+SupplicantStatus VendorStaNetwork::setDppNetAccessKeyExpiryInternal(uint32_t expiry)
+{
+#ifdef CONFIG_DPP
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	wpa_ssid->dpp_netaccesskey_expiry = expiry;
+	wpa_printf(MSG_MSGDUMP, "dpp_netaccesskey_expiry: %d",
+		   wpa_ssid->dpp_netaccesskey_expiry);
+	resetInternalStateAfterParamsUpdate();
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+SupplicantStatus VendorStaNetwork::setDppCsignInternal(
+    const std::vector<uint8_t> &csign)
+{
+#ifdef CONFIG_DPP
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (setHexStr2bin(csign.data(), csign.size(), &(wpa_ssid->dpp_csign),
+			  &(wpa_ssid->dpp_csign_len), "dpp C-Sign")) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+#else /* CONFIG_DPP */
+        return {{SupplicantStatusCode::FAILURE_UNKNOWN, ""}, ""};
+#endif /* CONFIG_DPP */
+}
+
+SupplicantStatus VendorStaNetwork::setGroupMgmtCipherInternal(uint32_t group_mgmt_cipher)
+{
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	if (group_mgmt_cipher & ~kAllowedVendorGroupMgmtCipherMask) {
+		return {SupplicantStatusCode::FAILURE_ARGS_INVALID, ""};
+	}
+	wpa_ssid->group_mgmt_cipher = group_mgmt_cipher;
+	wpa_printf(MSG_MSGDUMP, "group_mgmt_cipher: 0x%x", wpa_ssid->group_mgmt_cipher);
+	resetInternalStateAfterParamsUpdate();
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus VendorStaNetwork::setEapPhase1ParamsInternal(const std::string &phase1)
+{
+        struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+        if (setVendorStringFieldAndResetState(
+                phase1.c_str(), &(wpa_ssid->eap.phase1), "phase1")) {
+                return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+        }
+        return {SupplicantStatusCode::SUCCESS, ""};
+
+}
+
+SupplicantStatus VendorStaNetwork::setEapOpensslCiphersInternal(const std::string &openssl_ciphers)
+{
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+        if (setVendorStringFieldAndResetState(
+		openssl_ciphers.c_str(), &(wpa_ssid->eap.openssl_ciphers), "openssl_ciphers")) {
+		return {SupplicantStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
+SupplicantStatus VendorStaNetwork::setVendorSimNumberInternal(uint32_t id)
+{
+	struct wpa_ssid *wpa_ssid = retrieveNetworkPtr();
+	wpa_ssid->eap.sim_num = id;
+	resetInternalStateAfterParamsUpdate();
+	return {SupplicantStatusCode::SUCCESS, ""};
+}
+
 /**
  * Retrieve the underlying |wpa_ssid| struct pointer for
  * this network.
@@ -373,6 +540,36 @@ void VendorStaNetwork::resetInternalStateAfterParamsUpdate()
 	}
 }
 
+/**
+ * Helper function to set Hex string value to a bin field with a corresponding length
+ * field in |wpa_ssid| structue instance for this network.
+ * This function frees any existing data in these fields.
+ */
+int VendorStaNetwork::setHexStr2bin(
+    const uint8_t *value, const size_t value_len, uint8_t **to_update_field,
+    size_t *to_update_field_len, const char *hexdump_prefix)
+{
+	size_t len;
+	if (*to_update_field) {
+		os_free(*to_update_field);
+	}
+	if (value_len & 1)
+		return 1;
+
+	len = value_len / 2;
+	*to_update_field = (uint8_t *)os_malloc(len);
+	if (!(*to_update_field) ||
+	    hexstr2bin((const char *)value, *to_update_field, len)) {
+		return 1;
+	}
+	*to_update_field_len = len;
+
+	wpa_hexdump(
+	    MSG_MSGDUMP, hexdump_prefix, *to_update_field,
+	    *to_update_field_len);
+	resetInternalStateAfterParamsUpdate();
+	return 0;
+}
 }  // namespace implementation
 }  // namespace V2_0
 }  // namespace wifi
