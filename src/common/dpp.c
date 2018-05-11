@@ -3100,6 +3100,8 @@ dpp_auth_req_rx(void *msg_ctx, u8 dpp_allowed_roles, int qr_mutual,
 
 		wpa_msg(auth->msg_ctx, MSG_INFO, DPP_EVENT_SCAN_PEER_QR_CODE
 			"%s", hex);
+		wpas_notify_dpp_scan_peer_qrcode(auth->msg_ctx, i_bootstrap,
+						 i_bootstrap_len);
 		return auth;
 	}
 	if (dpp_auth_build_resp_ok(auth) < 0)
@@ -3110,6 +3112,7 @@ dpp_auth_req_rx(void *msg_ctx, u8 dpp_allowed_roles, int qr_mutual,
 not_compatible:
 	wpa_msg(auth->msg_ctx, MSG_INFO, DPP_EVENT_NOT_COMPATIBLE
 		"i-capab=0x%02x", auth->i_capab);
+	wpas_notify_dpp_not_compatible(auth->msg_ctx, auth->i_capab, 1);
 	if (dpp_allowed_roles & DPP_CAPAB_CONFIGURATOR)
 		auth->configurator = 1;
 	else
@@ -3405,6 +3408,7 @@ dpp_auth_resp_rx_status(struct dpp_authentication *auth, const u8 *hdr,
 	if (status == DPP_STATUS_NOT_COMPATIBLE) {
 		wpa_msg(auth->msg_ctx, MSG_INFO, DPP_EVENT_NOT_COMPATIBLE
 			"r-capab=0x%02x", auth->r_capab);
+		wpas_notify_dpp_not_compatible(auth->msg_ctx, auth->r_capab, 0);
 	} else if (status == DPP_STATUS_RESPONSE_PENDING) {
 		u8 role = auth->r_capab & DPP_CAPAB_ROLE_MASK;
 
@@ -3419,6 +3423,7 @@ dpp_auth_resp_rx_status(struct dpp_authentication *auth, const u8 *hdr,
 			wpa_msg(auth->msg_ctx, MSG_INFO,
 				DPP_EVENT_RESPONSE_PENDING "%s",
 				auth->tmp_own_bi ? auth->tmp_own_bi->uri : "");
+			wpas_notify_dpp_resp_pending(auth->msg_ctx);
 		}
 	}
 fail:

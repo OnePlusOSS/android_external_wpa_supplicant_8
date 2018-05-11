@@ -23,6 +23,7 @@
 #include "p2p_supplicant.h"
 #include "sme.h"
 #include "notify.h"
+#include "common/dpp.h"
 #include "hidl.h"
 
 int wpas_notify_supplicant_initialized(struct wpa_global *global)
@@ -1025,3 +1026,85 @@ void wpas_notify_mesh_peer_disconnected(struct wpa_supplicant *wpa_s,
 }
 
 #endif /* CONFIG_MESH */
+
+//DPP Notifications
+void wpas_notify_dpp_auth_success(void *msg_ctx, int initiator)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s)
+		return;
+
+	wpas_hidl_notify_dpp_auth_success(wpa_s, initiator);
+#endif /* CONFIG_DPP */
+}
+void wpas_notify_dpp_not_compatible(void *msg_ctx, u8 capab,
+				    int initiator)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s)
+		return;
+
+	wpas_hidl_notify_dpp_not_compatible(wpa_s, capab, initiator);
+#endif /* CONFIG_DPP */
+}
+void wpas_notify_dpp_resp_pending(void *msg_ctx)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s)
+		return;
+
+	wpas_hidl_notify_dpp_resp_pending(wpa_s);
+#endif /* CONFIG_DPP */
+}
+void wpas_notify_dpp_scan_peer_qrcode(void *msg_ctx,
+				      const u8* i_bootstrap,
+				      uint16_t i_bootstrap_len)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s || !i_bootstrap_len)
+		return;
+
+	wpas_hidl_notify_dpp_scan_peer_qrcode(wpa_s, i_bootstrap,
+					      i_bootstrap_len);
+#endif /* CONFIG_DPP */
+}
+void wpas_notify_dpp_conf(void *msg_ctx, u8 type, u8* ssid,
+			  u8 ssid_len, const char *connector,
+			  struct wpabuf *c_sign, struct wpabuf *net_access,
+			  uint32_t net_access_expiry, const char *passphrase,
+			  uint32_t psk_set, u8 *psk)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s)
+		return;
+
+	wpas_hidl_notify_dpp_conf(wpa_s, type, ssid, ssid_len, connector, c_sign,
+				  net_access, net_access_expiry, passphrase,
+				  psk_set, psk);
+#endif /* CONFIG_DPP */
+}
+void wpas_notify_dpp_missing_auth(void *msg_ctx, u8 dpp_auth_param)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s)
+		return;
+
+	wpas_hidl_notify_dpp_missing_auth(wpa_s, dpp_auth_param);
+#endif /* CONFIG_DPP */
+}
+void wpas_notify_dpp_net_id(void *msg_ctx, uint32_t net_id)
+{
+#ifdef CONFIG_DPP
+	struct wpa_supplicant *wpa_s = msg_ctx;
+	if (!wpa_s)
+		return;
+
+	wpas_hidl_notify_dpp_net_id(wpa_s, net_id);
+#endif /* CONFIG_DPP */
+}

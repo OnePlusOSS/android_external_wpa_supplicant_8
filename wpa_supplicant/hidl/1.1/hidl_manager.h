@@ -25,6 +25,12 @@
 #include "sta_network.h"
 #include "supplicant.h"
 
+#ifdef SUPPLICANT_VENDOR_HIDL
+#include "vendorsta_iface.h"
+#include "vendorsta_network.h"
+#include "supplicantvendor.h"
+#endif
+
 extern "C" {
 #include "utils/common.h"
 #include "utils/includes.h"
@@ -41,6 +47,10 @@ namespace implementation {
 using namespace android::hardware::wifi::supplicant::V1_0;
 using namespace android::hardware::wifi::supplicant::V1_1;
 using V1_0::ISupplicantStaIfaceCallback;
+#ifdef SUPPLICANT_VENDOR_HIDL
+using namespace vendor::qti::hardware::wifi::supplicantvendor::V2_0::Implementation;
+using namespace vendor::qti::hardware::wifi::supplicant::V2_0;
+#endif
 
 /**
  * HidlManager is responsible for managing the lifetime of all
@@ -132,6 +142,27 @@ public:
 	void notifyExtRadioWorkTimeout(
 	    struct wpa_supplicant *wpa_s, uint32_t id);
 
+#ifdef SUPPLICANT_VENDOR_HIDL
+	// DPP Callbacks
+	void notifyDppAuthSuccess(
+	    struct wpa_supplicant *wpa_s, int initiator);
+	void notifyDppNotCompatible(
+	    struct wpa_supplicant *wpa_s, u8 capab, int initiator);
+	void notifyDppResponsePending(struct wpa_supplicant *wpa_s);
+	void notifyDppScanPeerQrCode(
+	    struct wpa_supplicant *wpa_s, const u8* i_bootstrap,
+	    uint16_t i_bootstrap_len);
+	void notifyDppConf(
+	    struct wpa_supplicant *wpa_s, u8 type, u8* ssid, u8 ssid_len,
+	    const char *connector, struct wpabuf *c_sign, struct wpabuf *net_access,
+	    uint32_t net_access_expiry, const char *passphrase, uint32_t psk_set,
+	    u8 *psk);
+	void notifyDppMissingAuth(
+	    struct wpa_supplicant *wpa_s, u8 dpp_auth_param);
+	void notifyDppNetworkId(
+	    struct wpa_supplicant *wpa_s, uint32_t net_id);
+#endif
+
 	int getP2pIfaceHidlObjectByIfname(
 	    const std::string &ifname,
 	    android::sp<ISupplicantP2pIface> *iface_object);
@@ -158,6 +189,19 @@ public:
 	int addStaNetworkCallbackHidlObject(
 	    const std::string &ifname, int network_id,
 	    const android::sp<ISupplicantStaNetworkCallback> &callback);
+#ifdef SUPPLICANT_VENDOR_HIDL
+	// method for qti.hardware.wifi.supplicant@2.0
+	int registerVendorHidlService(struct wpa_global *global);
+	int getVendorStaIfaceHidlObjectByIfname(
+	    const std::string &ifname,
+	    android::sp<ISupplicantVendorStaIface> *iface_object);
+	int getVendorStaNetworkHidlObjectByIfnameAndNetworkId(
+	    const std::string &ifname, int network_id,
+	    android::sp<ISupplicantVendorStaNetwork> *network_object);
+	int addVendorStaIfaceCallbackHidlObject(
+	    const std::string &ifname,
+	    const android::sp<ISupplicantVendorStaIfaceCallback> &callback);
+#endif
 
 private:
 	HidlManager() = default;
@@ -203,6 +247,16 @@ private:
 	    const std::string &ifname, int network_id,
 	    const std::function<android::hardware::Return<void>(
 		android::sp<ISupplicantStaNetworkCallback>)> &method);
+#ifdef SUPPLICANT_VENDOR_HIDL
+	void removeVendorStaIfaceCallbackHidlObject(
+	    const std::string &ifname,
+	    const android::sp<ISupplicantVendorStaIfaceCallback> &callback);
+	bool checkForVendorStaIfaceCallback(const std::string &ifname);
+	void callWithEachVendorStaIfaceCallback(
+	    const std::string &ifname,
+	    const std::function<android::hardware::Return<void>(
+		android::sp<ISupplicantVendorStaIfaceCallback>)> &method);
+#endif
 
 	// Singleton instance of this class.
 	static HidlManager *instance_;
@@ -259,6 +313,28 @@ private:
 	    const std::string,
 	    std::vector<android::sp<ISupplicantStaNetworkCallback>>>
 	    sta_network_callbacks_map_;
+
+#ifdef SUPPLICANT_VENDOR_HIDL
+	// The main vendor hidl service object.
+	android::sp<SupplicantVendor> supplicantvendor_object_;
+	// Map of all the Vendor STA interface specific hidl objects controlled by
+	// wpa_supplicant. This map is keyed in by the corresponding
+	// |ifname|.
+	std::map<const std::string, android::sp<VendorStaIface>>
+	    vendor_sta_iface_object_map_;
+	// Map of all the Vendor STA network specific hidl objects controlled by
+	// wpa_supplicant. This map is keyed in by the corresponding
+	// |ifname| & |network_id|.
+	std::map<const std::string, android::sp<VendorStaNetwork>>
+	    vendor_sta_network_object_map_;
+	// Map of all the vendor callbacks registered for STA interface specific
+	// hidl objects controlled by wpa_supplicant.  This map is keyed in by
+	// the corresponding |ifname|.
+	std::map<
+	    const std::string,
+	    std::vector<android::sp<ISupplicantVendorStaIfaceCallback>>>
+	    vendor_sta_iface_callbacks_map_;
+#endif
 
 #if 0  // TODO(b/31632518): HIDL object death notifications.
 	/**
