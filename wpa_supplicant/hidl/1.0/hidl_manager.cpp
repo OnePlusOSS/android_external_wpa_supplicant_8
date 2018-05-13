@@ -405,6 +405,10 @@ int HidlManager::registerHidlService(struct wpa_global *global)
 	if (status != android::NO_ERROR) {
 		return 1;
 	}
+	if (!supplicant_object_->ensureConfigFileExists()) {
+		// If config file does not exist, we cannot start supplicant.
+		return 1;
+	}
 	return 0;
 }
 
