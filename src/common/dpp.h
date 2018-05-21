@@ -348,6 +348,19 @@ extern u8 dpp_nonce_override[DPP_MAX_NONCE_LEN];
 extern size_t dpp_nonce_override_len;
 #endif /* CONFIG_TESTING_OPTIONS */
 
+enum dpp_conf_event_type {
+	DPP_CONF_FAILED = 0,
+	DPP_CONF_SENT = 1,
+	DPP_CONF_RECEIVED = 2
+};
+
+enum dpp_auth_field {
+	DPP_AUTH_CONNECTOR = BIT(0),
+	DPP_AUTH_CSIGN_KEY = BIT(1),
+	DPP_AUTH_NET_ACCESS_KEY = BIT(2),
+	DPP_AUTH_NET_ACCESS_KEY_EXPIRY = BIT(3)
+};
+
 void dpp_bootstrap_info_free(struct dpp_bootstrap_info *info);
 const char * dpp_bootstrap_type_txt(enum dpp_bootstrap_type type);
 int dpp_bootstrap_key_hash(struct dpp_bootstrap_info *bi);
@@ -430,5 +443,20 @@ int dpp_pkex_rx_commit_reveal_resp(struct dpp_pkex *pkex, const u8 *hdr,
 void dpp_pkex_free(struct dpp_pkex *pkex);
 
 char * dpp_corrupt_connector_signature(const char *connector);
+
+//DPP Notifications
+void wpas_notify_dpp_auth_success(void *msg_ctx, int initiator);
+void wpas_notify_dpp_not_compatible(void *msg_ctx, u8 capab, int initiator);
+void wpas_notify_dpp_resp_pending(void *msg_ctx);
+void wpas_notify_dpp_scan_peer_qrcode(void *msg_ctx,
+				      const u8* i_bootstrap,
+				      uint16_t i_bootstrap_len);
+void wpas_notify_dpp_conf(void *msg_ctx, u8 type, u8* ssid,
+			  u8 ssid_len, const char *connector,
+			  struct wpabuf *c_sign, struct wpabuf *net_access,
+			  uint32_t net_access_expiry, const char *passphrase,
+			  uint32_t psk_set, u8 *psk);
+void wpas_notify_dpp_missing_auth(void *msg_ctx, u8 dpp_auth_param);
+void wpas_notify_dpp_net_id(void *msg_ctx, uint32_t net_id);
 
 #endif /* DPP_H */

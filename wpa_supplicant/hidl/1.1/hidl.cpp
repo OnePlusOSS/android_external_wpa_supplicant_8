@@ -58,6 +58,9 @@ struct wpas_hidl_priv *wpas_hidl_init(struct wpa_global *global)
 	if (!hidl_manager)
 		goto err;
 	hidl_manager->registerHidlService(global);
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->registerVendorHidlService(global);
+#endif
 	// We may not need to store this hidl manager reference in the
 	// global data strucure because we've made it a singleton class.
 	priv->hidl_manager = (void *)hidl_manager;
@@ -631,15 +634,141 @@ void wpas_hidl_notify_eap_error(
 {
 	if (!wpa_s)
 		return;
+        wpa_printf(
+             MSG_DEBUG,
+             "Notifying EAP Error: %d ", error_code);
 
-	wpa_printf(
-	    MSG_DEBUG,
-            "Notifying EAP Error: %d ", error_code);
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+	hidl_manager->notifyEapError(wpa_s, error_code);
+
+}
+//DPP Notifications
+void wpas_hidl_notify_dpp_auth_success(
+    struct wpa_supplicant *wpa_s, int initiator)
+{
+	if (!wpa_s)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP Auth Success to hidl control."
+			       " Initiator:%d", initiator);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppAuthSuccess(wpa_s, initiator);
+#endif
+}
+
+void wpas_hidl_notify_dpp_not_compatible(
+    struct wpa_supplicant *wpa_s, u8 capab, int initiator)
+{
+	if (!wpa_s)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP not compatible to hidl control."
+			       " Initiator:%d capab:%x", initiator, capab);
 
 	HidlManager *hidl_manager = HidlManager::getInstance();
 	if (!hidl_manager)
 		return;
 
-	hidl_manager->notifyEapError(wpa_s, error_code);
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppNotCompatible(wpa_s, capab, initiator);
+#endif
 }
 
+void wpas_hidl_notify_dpp_resp_pending(struct wpa_supplicant *wpa_s)
+{
+	if (!wpa_s)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP response pending to hidl control.");
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppResponsePending(wpa_s);
+#endif
+}
+
+void wpas_hidl_notify_dpp_scan_peer_qrcode(
+    struct wpa_supplicant *wpa_s, const u8* i_bootstrap,
+    uint16_t i_bootstrap_len)
+{
+	if (!wpa_s || !i_bootstrap)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP scan peer QR Code to hidl control."
+			       " bootstrap_len:%u", i_bootstrap_len);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppScanPeerQrCode(wpa_s, i_bootstrap, i_bootstrap_len);
+#endif
+}
+
+void wpas_hidl_notify_dpp_conf(
+    struct wpa_supplicant *wpa_s, u8 type, u8* ssid, u8 ssid_len,
+    const char *connector, struct wpabuf *c_sign, struct wpabuf *net_access,
+    uint32_t net_access_expiry, const char *passphrase, uint32_t psk_set, u8* psk)
+{
+	if (!wpa_s)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP conf to hidl control."
+			       " type:%u", type);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppConf(wpa_s, type, ssid, ssid_len,
+				    connector, c_sign, net_access,
+				    net_access_expiry, passphrase, psk_set, psk);
+#endif
+}
+
+void wpas_hidl_notify_dpp_missing_auth(
+    struct wpa_supplicant *wpa_s, u8 dpp_auth_param)
+{
+	if (!wpa_s)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP Missing Auth param to hidl control."
+			       " missing param:%x", dpp_auth_param);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppMissingAuth(wpa_s, dpp_auth_param);
+#endif
+}
+
+void wpas_hidl_notify_dpp_net_id(
+    struct wpa_supplicant *wpa_s, uint32_t net_id)
+{
+	if (!wpa_s)
+		return;
+
+	wpa_printf(MSG_DEBUG, "Notifying DPP network is added to hidl control."
+			       " network id:%u", net_id);
+
+	HidlManager *hidl_manager = HidlManager::getInstance();
+	if (!hidl_manager)
+		return;
+
+#ifdef SUPPLICANT_VENDOR_HIDL
+	hidl_manager->notifyDppNetworkId(wpa_s, net_id);
+#endif
+}
