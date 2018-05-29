@@ -1098,6 +1098,9 @@ ifeq ($(filter gce_x86 gce_x86_64 calypso generic_x86 generic_x86_64 generic gen
 ifdef CONFIG_CTRL_IFACE_HIDL
 HOSTAPD_USE_HIDL=y
 L_CFLAGS += -DCONFIG_CTRL_IFACE_HIDL
+ifdef HOSTAPD_USE_VENDOR_HIDL
+L_CFLAGS += -DCONFIG_USE_VENDOR_HIDL
+endif
 L_CPPFLAGS = -Wall -Werror
 endif
 endif
@@ -1138,6 +1141,10 @@ ifeq ($(HOSTAPD_USE_HIDL), y)
 LOCAL_SHARED_LIBRARIES += android.hardware.wifi.hostapd@1.0
 LOCAL_SHARED_LIBRARIES += libbase libhidlbase libhidltransport libhwbinder libutils
 LOCAL_STATIC_LIBRARIES += libhostapd_hidl
+ifdef HOSTAPD_USE_VENDOR_HIDL
+LOCAL_SHARED_LIBRARIES += vendor.qti.hardware.wifi.hostapd@1.0 \
+    libqsap_sdk
+endif
 endif
 LOCAL_CFLAGS := $(L_CFLAGS)
 LOCAL_SRC_FILES := $(OBJS)
@@ -1168,6 +1175,24 @@ LOCAL_SHARED_LIBRARIES := \
     liblog
 LOCAL_EXPORT_C_INCLUDE_DIRS := \
     $(LOCAL_PATH)/hidl/$(HIDL_INTERFACE_VERSION)
+
+ifdef HOSTAPD_USE_VENDOR_HIDL
+VENDOR_HIDL_INTERFACE_VERSION = 1.0
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/hidl/$(HIDL_INTERFACE_VERSION)
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/hidl/vendor/$(VENDOR_HIDL_INTERFACE_VERSION)
+ifeq ($(BOARD_HAS_QCOM_WLAN), true)
+LOCAL_C_INCLUDES += $(TARGET_OUT_HEADERS)/sdk/softap/include
+endif
+
+LOCAL_SRC_FILES += \
+    hidl/vendor/$(VENDOR_HIDL_INTERFACE_VERSION)/qsap_handler.cpp \
+    hidl/vendor/$(VENDOR_HIDL_INTERFACE_VERSION)/hostapd_vendor.cpp
+LOCAL_SHARED_LIBRARIES += \
+    vendor.qti.hardware.wifi.hostapd@1.0 \
+    libqsap_sdk
+LOCAL_HEADER_LIBRARIES := libqsap_headers
+endif
+
 include $(BUILD_STATIC_LIBRARY)
 endif # HOSTAPD_USE_HIDL == y
 endif # ifeq ($(WPA_BUILD_HOSTAPD),true)
