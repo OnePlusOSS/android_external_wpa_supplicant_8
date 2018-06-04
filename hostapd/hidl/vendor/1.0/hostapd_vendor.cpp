@@ -33,9 +33,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <set>
+#include <iostream>
 
 #include <android-base/file.h>
 #include <android-base/stringprintf.h>
+#include <hidl/HidlSupport.h>
 
 #include "hostapd_vendor.h"
 #include "qsap_handler.h"
@@ -57,6 +60,7 @@ namespace {
 constexpr char kConfFileNameFmt[] = "/data/vendor/wifi/hostapd/hostapd%s.conf";
 constexpr char kQsapSetFmt[] = "softap qccmd set%s %s=%s";
 
+using android::hardware::hidl_array;
 using android::base::StringPrintf;
 using android::hardware::wifi::hostapd::V1_0::IHostapd;
 using vendor::qti::hardware::wifi::hostapd::V1_0::IHostapdVendor;
@@ -214,6 +218,50 @@ std::string AddOrUpdateHostapdConfig(
 
 	return file_path;
 }
+
+template <class CallbackType>
+int addIfaceCallbackHidlObjectToMap(
+    const std::string &ifname, const android::sp<CallbackType> &callback,
+    std::map<const std::string, std::vector<android::sp<CallbackType>>>
+	&callbacks_map)
+{
+	if (ifname.empty())
+		return 1;
+
+	auto iface_callback_map_iter = callbacks_map.find(ifname);
+	if (iface_callback_map_iter == callbacks_map.end())
+		return 1;
+
+	auto &iface_callback_list = iface_callback_map_iter->second;
+
+        std::vector<android::sp<CallbackType>> &callback_list = iface_callback_list;
+	callback_list.push_back(callback);
+	return 0;
+}
+
+template <class CallbackType>
+void callWithEachIfaceCallback(
+    const std::string &ifname,
+    const std::function<
+	android::hardware::Return<void>(android::sp<CallbackType>)> &method,
+    const std::map<const std::string, std::vector<android::sp<CallbackType>>>
+	&callbacks_map)
+{
+	if (ifname.empty())
+		return;
+
+	auto iface_callback_map_iter = callbacks_map.find(ifname);
+	if (iface_callback_map_iter == callbacks_map.end())
+		return;
+
+	const auto &iface_callback_list = iface_callback_map_iter->second;
+	for (const auto &callback : iface_callback_list) {
+		if (!method(callback).isOk()) {
+			wpa_printf(
+			    MSG_ERROR, "Failed to invoke Hostapd HIDL iface callback");
+		}
+	}
+}
 }  // namespace
 
 
@@ -258,6 +306,15 @@ Return<void> HostapdVendor::setHostapdParams(
 {
 	return call(
 	    this, &HostapdVendor::setHostapdParamsInternal, _hidl_cb, cmd);
+}
+
+Return<void> HostapdVendor::registerVendorCallback(
+    const hidl_string& iface_name,
+    const android::sp<IHostapdVendorIfaceCallback> &callback,
+    registerVendorCallback_cb _hidl_cb)
+{
+	return call(
+	    this, &HostapdVendor::registerCallbackInternal, _hidl_cb, iface_name, callback);
 }
 
 HostapdStatus HostapdVendor::addVendorAccessPointInternal(
@@ -320,6 +377,72 @@ HostapdStatus HostapdVendor::setHostapdParamsInternal(const std::string& cmd)
 		return {HostapdStatusCode::FAILURE_UNKNOWN, ""};
 
 	return {HostapdStatusCode::SUCCESS, ""};
+}
+
+int HostapdVendor::onStaConnected(uint8_t * Macaddr, char *iface_name)
+{
+	// Invoke the |onStaConnected| method on all Hostapd registered callbacks.
+	callWithEachHostapdIfaceCallback(
+	    iface_name,
+	    std::bind(
+	    &IHostapdVendorIfaceCallback::onStaConnected, std::placeholders::_1,
+	    Macaddr));
+	return 0;
+}
+
+int HostapdVendor::onStaDisconnected(uint8_t * Macaddr, char *iface_name)
+{
+	// Invoke the |onStaDisconnected| method on all Hostapd registered callbacks.
+	callWithEachHostapdIfaceCallback(
+	    iface_name,
+	    std::bind(
+	    &IHostapdVendorIfaceCallback::onStaDisconnected, std::placeholders::_1,
+	    Macaddr));
+	return 0;
+}
+
+HostapdStatus HostapdVendor::registerCallbackInternal(
+    const std::string& iface_name,
+    const android::sp<IHostapdVendorIfaceCallback> &callback)
+{
+	if(addVendorIfaceCallbackHidlObject(iface_name, callback)) {
+	   wpa_printf(MSG_ERROR, "FAILED to register Hostapd Vendor IfaceCallback");
+	   return {HostapdStatusCode::FAILURE_UNKNOWN, ""};
+	}
+	return {HostapdStatusCode::SUCCESS, ""};
+}
+
+/**
+ * Add a new Hostapd vendoriface callback hidl object
+ * reference to our interface callback list.
+ *
+ * @param ifname Name of the corresponding interface.
+ * @param callback Hidl reference of the vendor ifacecallback object.
+ *
+ * @return 0 on success, 1 on failure.
+ */
+int HostapdVendor::addVendorIfaceCallbackHidlObject(
+    const std::string &ifname,
+    const android::sp<IHostapdVendorIfaceCallback> &callback)
+{
+	vendor_hostapd_callbacks_map_[ifname] =
+		    std::vector<android::sp<IHostapdVendorIfaceCallback>>();
+	return addIfaceCallbackHidlObjectToMap(ifname, callback, vendor_hostapd_callbacks_map_);
+}
+
+/**
+ * Helper function to invoke the provided callback method on all the
+ * registered |IHostapdVendorIfaceCallback| callback hidl objects.
+ *
+ * @param ifname Name of the corresponding interface.
+ * @param method Pointer to the required hidl method from
+ * |IHostapdVendorIfaceCallback|.
+ */
+void HostapdVendor::callWithEachHostapdIfaceCallback(
+    const std::string &ifname,
+    const std::function<Return<void>(android::sp<IHostapdVendorIfaceCallback>)> &method)
+{
+	callWithEachIfaceCallback(ifname, method, vendor_hostapd_callbacks_map_);
 }
 
 }  // namespace implementation

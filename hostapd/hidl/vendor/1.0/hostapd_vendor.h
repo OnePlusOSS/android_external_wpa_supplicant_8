@@ -38,6 +38,7 @@
 
 #include <android/hardware/wifi/hostapd/1.0/IHostapd.h>
 #include <vendor/qti/hardware/wifi/hostapd/1.0/IHostapdVendor.h>
+#include <vendor/qti/hardware/wifi/hostapd/1.0/IHostapdVendorIfaceCallback.h>
 
 extern "C"
 {
@@ -60,6 +61,7 @@ using namespace android::hardware::wifi::hostapd::V1_0;
 
 typedef IHostapd::IfaceParams IfaceParams;
 typedef IHostapd::NetworkParams NetworkParams;
+
 /**
  * Implementation of the hostapd hidl object. This hidl
  * object is used core for global control operations on
@@ -69,6 +71,7 @@ class HostapdVendor : public V1_0::IHostapdVendor
 {
 public:
 	HostapdVendor(hapd_interfaces* interfaces);
+	HostapdVendor() = default;
 	~HostapdVendor() override = default;
 
 	// Vendor Hidl methods exposed.
@@ -81,6 +84,16 @@ public:
 	Return<void> setHostapdParams(
 	    const hidl_string& cmd,
 	    setHostapdParams_cb _hidl_cb) override;
+	int onStaConnected(uint8_t *Macaddr, char *iface_name);
+	int onStaDisconnected(
+	    uint8_t *Macaddr, char *iface_name);
+	Return<void> registerVendorCallback(
+	    const hidl_string& cmd,
+	    const android::sp<IHostapdVendorIfaceCallback>& callback,
+	    registerVendorCallback_cb _hidl_cb) override;
+	int addVendorIfaceCallbackHidlObject(
+	    const std::string &ifname,
+	    const android::sp<IHostapdVendorIfaceCallback> &callback);
 
 private:
 	// Corresponding worker functions for the HIDL methods.
@@ -88,9 +101,20 @@ private:
 	    const VendorIfaceParams& iface_params, const NetworkParams& nw_params);
 	HostapdStatus removeVendorAccessPointInternal(const std::string& iface_name);
 	HostapdStatus setHostapdParamsInternal(const std::string& cmd);
-
+	HostapdStatus registerCallbackInternal(
+	    const std::string& iface_name,
+	    const android::sp<IHostapdVendorIfaceCallback>& callback);
+	void callWithEachHostapdIfaceCallback(
+            const std::string &ifname,
+	    const std::function<android::hardware::Return<void>(
+		android::sp<IHostapdVendorIfaceCallback>)> &method);
+        void setIfacename(const std::string &ifname);
 	// Raw pointer to the global structure maintained by the core.
 	struct hapd_interfaces* interfaces_;
+        std::map<
+	    const std::string,
+	    std::vector<android::sp<IHostapdVendorIfaceCallback>>>
+	    vendor_hostapd_callbacks_map_;
 
 	DISALLOW_COPY_AND_ASSIGN(HostapdVendor);
 };
