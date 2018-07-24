@@ -37,7 +37,7 @@ static android::sp<IHostapd> service;
 using vendor::qti::hardware::wifi::hostapd::V1_0::IHostapdVendor;
 using vendor::qti::hardware::wifi::hostapd::V1_0::implementation::HostapdVendor;
 
-static android::sp<IHostapdVendor> vendor_service;
+static android::sp<HostapdVendor> vendor_service;
 #endif /* CONFIG_USE_VENDOR_HIDL */
 
 void hostapd_hidl_sock_handler(
@@ -102,3 +102,32 @@ void hostapd_hidl_deinit(struct hapd_interfaces *interfaces)
 	vendor_service.clear();
 #endif /* CONFIG_USE_VENDOR_HIDL */
 }
+
+#ifdef CONFIG_USE_VENDOR_HIDL
+int notify_hidl_sta_connected(int num_sta, const u8 *addr, char * iface_name){
+
+	uint8_t num_stations = (uint8_t)num_sta;
+	uint8_t * Macaddr = (uint8_t *)addr;
+
+	wpa_printf(MSG_INFO,"num_sta[%d]: Connected Macaddress" MACSTR , num_stations, MAC2STR(Macaddr));
+
+	if (!vendor_service) {
+		wpa_printf(MSG_ERROR,"Failed to getInstance of hostapdvendor");
+		return -1;
+	}
+	return vendor_service->onStaConnected(Macaddr, iface_name);
+}
+
+int notify_hidl_sta_disconnected(const u8 *addr, char * iface_name){
+
+	uint8_t * Macaddr = (uint8_t *)addr;
+
+	wpa_printf(MSG_INFO," Disconnected Macaddress:" MACSTR , MAC2STR(Macaddr));
+
+	if (!vendor_service) {
+		wpa_printf(MSG_ERROR,"Failed to getInstance of hostapdvendor");
+		return -1;
+	}
+	return vendor_service->onStaDisconnected(Macaddr, iface_name);
+}
+#endif /* CONFIG_USE_VENDOR_HIDL */

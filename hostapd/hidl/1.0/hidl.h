@@ -22,6 +22,10 @@ extern "C"
  */
 int hostapd_hidl_init(struct hapd_interfaces *interfaces);
 void hostapd_hidl_deinit(struct hapd_interfaces *interfaces);
+#ifdef CONFIG_USE_VENDOR_HIDL
+int notify_hidl_sta_connected(int num_sta, const u8 *addr, char *iface_name);
+int notify_hidl_sta_disconnected(const u8 *addr, char *iface_name);
+#endif /* CONFIG_USE_VENDOR_HIDL */
 
 #ifdef __cplusplus
 }
